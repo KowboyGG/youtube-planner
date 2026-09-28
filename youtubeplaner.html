@@ -551,7 +551,7 @@ a.pill{color:var(--text)}
 <div class="toast" id="toast"></div>
 <script id="planner-data" type="application/json">null</script>
 <script>
-const APP_VERSION = 8; // запускатор сравнивает с версией файла на диске и предлагает обновить страницу
+const APP_VERSION = 9; // запускатор сравнивает с версией файла на диске и предлагает обновить страницу
 
 /* ================= утилиты ================= */
 const $ = (s, r = document) => r.querySelector(s);
@@ -1906,9 +1906,16 @@ function googleToken(interactive) {
   }));
 }
 
+// Запрос к Google с ограничением по времени — чтобы загрузка не висела вечно, если ответ не пришёл
+async function gFetch(url, init = {}, ms = 45e3) {
+  try { return await fetch(url, {...init, signal: AbortSignal.timeout(ms)}); }
+  catch (e) { throw new Error(e.name === 'TimeoutError' ? 'Google не ответил за ' + Math.round(ms / 1000) + ' с — попробуй ещё раз' : 'нет связи с Google'); }
+}
+const anProgress = text => { const b = $('[data-act="anload"], [data-act="anvload"]'); if (b?.disabled) b.textContent = text; };
+
 async function gGet(url) {
   const token = await googleToken(false);
-  const r = await fetch(url, {headers: {authorization: 'Bearer ' + token}});
+  const r = await gFetch(url, {headers: {authorization: 'Bearer ' + token}});
   const d = await r.json().catch(() => ({}));
   if (r.status === 401) { gAuth = {token: '', exp: 0}; throw new Error('Вход Google истёк — нажми «Подключить Google» ещё раз'); }
   if (!r.ok) {
@@ -1960,10 +1967,19 @@ async function fetchReach() {
   const reach = state.reach, done = new Set(reach.done);
   const todo = (await gList(`${YTR}jobs/${job.id}/reports`, 'reports')).filter(r => !done.has(r.id))
     .sort((a, b) => (a.createTime || '').localeCompare(b.createTime || '')).slice(0, 90);
-  for (const rep of todo) {
-    const res = await fetch('/api/google-report?url=' + encodeURIComponent(rep.downloadUrl), {headers: {'x-planer': '1', 'x-google-auth': 'Bearer ' + token}});
-    if (!res.ok) throw new Error('не удалось скачать отчёт (' + res.status + ')');
-    const lines = (await res.text()).trim().split(/\r?\n/), head = (lines.shift() || '').split(',');
+  let got = 0, failed = 0;
+  const texts = new Map();
+  for (let i = 0; i < todo.length; i += 6) await Promise.all(todo.slice(i, i + 6).map(async rep => {
+    try {
+      const res = await gFetch('/api/google-report?url=' + encodeURIComponent(rep.downloadUrl), {headers: {'x-planer': '1', 'x-google-auth': 'Bearer ' + token}}, 60e3);
+      if (!res.ok) throw new Error(res.status);
+      texts.set(rep.id, await res.text());
+    } catch (e) { failed++; }
+    anProgress(`⏳ CTR: ${++got} из ${todo.length}`);
+  }));
+  for (const rep of todo) { // разбираем по порядку создания: более свежий отчёт за тот же день главнее
+    if (!texts.has(rep.id)) continue;
+    const lines = texts.get(rep.id).trim().split(/\r?\n/), head = (lines.shift() || '').split(',');
     const [iDate, iVid, iImp, iCtr] = ['date', 'video_id', 'video_thumbnail_impressions', 'video_thumbnail_impressions_ctr'].map(h => head.indexOf(h));
     if (iVid >= 0 && iImp >= 0) {
       const parsed = lines.map(l => l.split(',')).map(c => ({day: String(c[iDate] || '').replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3'), vid: c[iVid], impr: Number(c[iImp]) || 0, ctr: Number(c[iCtr]) || 0}));
@@ -1983,6 +1999,7 @@ async function fetchReach() {
   for (const day of Object.keys(reach.days)) if (day < cut) { delete reach.days[day]; delete reach.created[day]; }
   reach.done = [...done].slice(-800);
   reach.fetchedAt = Date.now();
+  if (failed) throw new Error(`не скачалось ${plural(failed, ['отчёт', 'отчёта', 'отчётов'])} из ${todo.length} — нажми «Обновить» ещё раз, остальное уже сохранено`);
   return todo.length;
 }
 
@@ -2009,8 +2026,11 @@ async function loadAnalytics(btn) {
   document.querySelectorAll('#tabBody .box').forEach(b => b.classList.add('loading'));
   const errors = [];
   let reachResult = 0;
+  anProgress('⏳ Просмотры…');
   try { await fetchAnalytics(days); } catch (e) { errors.push(e.message); }
+  anProgress('⏳ CTR…');
   try { reachResult = await fetchReach(); } catch (e) { errors.push('CTR: ' + e.message); }
+  anProgress('⏳ Часы…');
   try { await fetchYpp(); } catch (e) { errors.push('Часы для монетизации: ' + e.message); }
   touch();
   busy(btn, false);

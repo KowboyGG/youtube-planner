@@ -66,9 +66,9 @@ function readBody(req, limit) {
 }
 
 // Ответ внешнего сервиса передаём браузеру как есть, в том числе потоком (для ChatGPT)
-async function pipeFetch(res, url, init) {
+async function pipeFetch(res, url, init, timeoutMs) {
   let r;
-  try { r = await fetch(url, init); }
+  try { r = await fetch(url, timeoutMs ? {...init, signal: AbortSignal.timeout(timeoutMs)} : init); } // отчёты и картинки не должны висеть вечно
   catch (e) { return fail(res, 502, `Нет связи с ${new URL(url).host}: ${e.message}`); }
   const headers = {'cache-control': 'no-store'};
   const type = r.headers.get('content-type');
@@ -227,13 +227,13 @@ async function handle(req, res) {
     case 'GET /api/google-report': { // CSV-отчёты YouTube Reporting API (CTR и показы превью)
       const target = new URL(url.searchParams.get('url') || '');
       if (target.protocol !== 'https:' || target.hostname !== 'youtubereporting.googleapis.com') return fail(res, 400, 'Недопустимый адрес');
-      return pipeFetch(res, target, {headers: {authorization: req.headers['x-google-auth'] || ''}});
+      return pipeFetch(res, target, {headers: {authorization: req.headers['x-google-auth'] || ''}}, 90e3);
     }
 
     case 'GET /api/image': { // баннеры и аватары каналов
       const target = new URL(url.searchParams.get('url') || '');
       if (target.protocol !== 'https:' || !/(^|\.)(ggpht\.com|googleusercontent\.com|ytimg\.com)$/.test(target.hostname)) return fail(res, 400, 'Недопустимый адрес');
-      return pipeFetch(res, target, {});
+      return pipeFetch(res, target, {}, 30e3);
     }
   }
   return fail(res, 404, 'Не найдено');
