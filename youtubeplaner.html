@@ -426,6 +426,87 @@ a.pill{color:var(--text)}
   .cal-dow{padding:6px 4px}
 }
 
+/* ---------- инструменты: лаборатория, выстрелило, радар, запросы, тренажёр, монетизация ---------- */
+.tool-head{margin:24px 0 8px}
+.tool-head h1{margin:0 0 6px;font-size:28px}
+.idea-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.idea-row .pill,.ask .pill{height:30px;font-size:12px;padding:0 12px}
+.idea-on{color:#7bd88f}
+.rt-sep{align-self:center}
+.lab-top{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:16px 0}
+.lab-top select,.lab-top input{height:36px;background:var(--bg);border:1px solid #303030;border-radius:18px;padding:0 14px;outline:none;color-scheme:dark;max-width:100%}
+.lab-top input{flex:1;min-width:240px}
+.box h4{font-size:14px;margin:16px 0 8px}
+.lf{--fg:#f1f1f1;--fg2:#aaa;background:#0f0f0f;color:var(--fg);border:1px solid var(--line);border-radius:12px;padding:16px}
+.lf.light{--fg:#0f0f0f;--fg2:#606060;background:#fff}
+.lf-thumb{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#3f3f3f}
+.lf-thumb img,.lf-thumb .ph{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.lf-dur{position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.8);color:#fff;font-size:12px;font-weight:500;padding:1px 4px;border-radius:4px}
+.lf-body{display:flex;gap:12px;padding-top:12px}
+.lf-ava{width:36px;height:36px;border-radius:50%;flex:none;background:#777;object-fit:cover}
+.lf-text{min-width:0;flex:1}
+.lf-title{font-size:16px;line-height:22px;font-weight:500;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;margin-bottom:4px}
+.lf-meta{color:var(--fg2);font-size:14px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lf-home,.lf-shorts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:40px 16px;max-width:1100px}
+.lf-shorts{grid-template-columns:repeat(5,minmax(0,1fr));gap:16px 8px}
+.lf-shorts .lf-thumb{aspect-ratio:9/16}
+.lf-shorts .lf-dur,.lf-shorts .lf-ava{display:none}
+.lf-phone{width:390px;max-width:100%;height:720px;overflow-y:auto;padding:0;border-radius:28px;border:8px solid #333}
+.lf-phone .lf-card{margin-bottom:20px}
+.lf-phone .lf-thumb{border-radius:0}
+.lf-phone .lf-body{padding:12px 12px 0}
+.lf-phone .lf-title{font-size:15px;line-height:21px}
+.lf-phone .lf-meta{font-size:12px;line-height:18px}
+.lf-side{width:402px;max-width:100%;display:grid;gap:8px}
+.lf-side .lf-card{display:flex;gap:8px}
+.lf-side .lf-thumb{width:168px;flex:none;border-radius:8px}
+.lf-side .lf-body{padding:0}
+.lf-side .lf-title{font-size:14px;line-height:20px}
+.lf-side .lf-meta{font-size:12px;line-height:18px}
+.lf-me.flash{outline:3px solid var(--blue);outline-offset:4px;border-radius:12px}
+.lf-measure{position:absolute;left:-9999px;top:0;visibility:hidden}
+.lf-measure.lf-home,.lf-measure.lf-shorts{width:1100px}
+.loupe{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end}
+.loupe figure{margin:0}
+.loupe figcaption{font-size:12px;color:var(--text2);margin-top:6px}
+.loupe .shot{position:relative;aspect-ratio:16/9;border-radius:8px;overflow:hidden;background:var(--bg3)}
+.loupe .shot img,.loupe .shot canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.zone{position:absolute;border:2px dashed #ff7a7a;border-radius:4px}
+.verdicts{display:grid;gap:6px;line-height:1.5}
+.verdicts + .an-table-wrap{margin-top:12px}
+.swatches{display:flex;gap:4px;flex-wrap:wrap}
+.swatches i{width:30px;height:30px;border-radius:6px;display:inline-grid;place-items:end center;font-size:10px;font-style:normal;color:#fff;text-shadow:0 0 3px #000}
+.word-chips{display:flex;gap:6px;flex-wrap:wrap}
+.word-chips span{background:var(--bg3);border-radius:12px;padding:3px 10px;font-size:13px;cursor:default}
+.word-chips small{opacity:.6}
+.word-chips .hi{background:rgba(43,166,64,.2);color:#7bd88f}
+.word-chips .lo{background:rgba(255,80,80,.15);color:#ff9a9a}
+.ypp{display:grid;gap:14px}
+.ypp-row{display:grid;grid-template-columns:minmax(150px,220px) 1fr;gap:4px 16px;align-items:center}
+.ypp-bar{height:10px;background:var(--bg3);border-radius:5px;overflow:hidden}
+.ypp-bar i{display:block;height:100%;background:linear-gradient(90deg,#ff0033,#ff7a45);border-radius:5px}
+.ypp-row small{grid-column:2;color:var(--text2);font-size:12px}
+.radar-form{display:flex;gap:8px;margin:16px 0 8px;max-width:600px}
+.radar-form input{flex:1;min-width:0;height:36px;background:var(--bg);border:1px solid #303030;border-radius:18px;padding:0 14px;outline:none}
+.chip button{margin-left:8px;opacity:.6}
+#radarSort{margin-left:auto;height:32px;background:var(--bg3);border:0;border-radius:8px;padding:0 8px;color-scheme:dark}
+.ask-list{display:grid;gap:10px}
+.ask{background:var(--bg2);border-radius:12px;padding:12px 14px}
+.ask-text{white-space:pre-wrap;word-break:break-word;line-height:1.5}
+.ask-meta{font-size:12px;margin:6px 0 8px}
+.ask mark{background:#6b5600;color:#fff;border-radius:3px;padding:0 2px}
+.game{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;max-width:900px;margin:16px 0}
+.game .card{border-radius:14px;padding:8px;outline:3px solid transparent}
+.game .card.win{outline-color:var(--green)}
+.game .card.lose{outline-color:#ff5a5a}
+.game-res{font-size:16px;font-weight:500;margin-top:6px}
+@media (max-width:700px){
+  .lf-home,.lf-shorts{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .game{grid-template-columns:1fr}
+  .ypp-row{grid-template-columns:1fr}
+  .ypp-row small{grid-column:1}
+}
+
 @media (max-width:1000px){
   .watch{grid-template-columns:1fr}
   .playlist{position:static;max-height:none}
@@ -470,7 +551,7 @@ a.pill{color:var(--text)}
 <div class="toast" id="toast"></div>
 <script id="planner-data" type="application/json">null</script>
 <script>
-const APP_VERSION = 7; // запускатор сравнивает с версией файла на диске и предлагает обновить страницу
+const APP_VERSION = 8; // запускатор сравнивает с версией файла на диске и предлагает обновить страницу
 
 /* ================= утилиты ================= */
 const $ = (s, r = document) => r.querySelector(s);
@@ -597,7 +678,7 @@ const DEFAULT_TEMPLATE = ['План', 'Сценарий', 'Видеоматер�
 
 function makeVideo(type, title = '') {
   const now = Date.now();
-  return {id: uid(), type, title, notes: '', link: '', deadline: '', thumb: '', createdAt: now, updatedAt: now,
+  return {id: uid(), type, title, notes: '', link: '', deadline: '', thumb: '', inspo: '', createdAt: now, updatedAt: now,
     stages: state.template.map(name => ({id: uid(), name, done: false, notes: '', deadline: '', pct: 0, rich: true}))};
 }
 
@@ -608,12 +689,13 @@ function normalize(s) {
   if (!Array.isArray(s.template) || !s.template.length) s.template = DEFAULT_TEMPLATE.slice();
   s.videos = (Array.isArray(s.videos) ? s.videos : []).map(v => ({
     id: v.id || uid(), type: v.type === 'short' ? 'short' : 'video', title: v.title || '', notes: v.notes || '',
-    link: v.link || '', deadline: v.deadline || '', thumb: v.thumb || '',
+    link: v.link || '', deadline: v.deadline || '', thumb: v.thumb || '', inspo: v.inspo || '',
     createdAt: v.createdAt || Date.now(), updatedAt: v.updatedAt || v.createdAt || Date.now(),
     yt: v.yt || null, ytHistory: Array.isArray(v.ytHistory) ? v.ytHistory : [], ai: v.ai || null, ytAnalytics: v.ytAnalytics || null,
     stages: (Array.isArray(v.stages) ? v.stages : []).map(st => ({id: st.id || uid(), name: st.name || 'Этап', done: !!st.done, notes: st.notes || '',
       deadline: st.deadline || '', pct: st.done ? 100 : [25, 50, 75].includes(st.pct) ? st.pct : 0, rich: !!st.rich}))
   }));
+  s.radar = {queries: [], days: 30, results: [], ...s.radar};
   s.ytSkip = Array.isArray(s.ytSkip) ? s.ytSkip : []; // ролики YouTube, удалённые из планера, — синхронизация их больше не предлагает
   s.competitors = (Array.isArray(s.competitors) ? s.competitors : []).filter(c => c && c.id)
     .map(c => ({...c, videos: Array.isArray(c.videos) ? c.videos : [], lastSeenAt: c.lastSeenAt || c.addedAt || Date.now()}));
@@ -777,6 +859,7 @@ function route() {
   document.body.classList.toggle('with-guide', page !== 'watch'); // на странице этапов панель прячется, как на YouTube
   if (page === 'watch' && state.videos.some(v => v.id === id)) { renderGuide(); return renderWatch(id); }
   if (page === 'rival' && state.competitors.some(c => c.id === id)) return renderRival(id, sub);
+  if (TOOL_PAGES[page]) { renderGuide(); return TOOL_PAGES[page](id); }
   ui.tab = ['home', 'videos', 'shorts', 'calendar', 'analytics'].includes(page) ? page : 'home';
   ui.anVideo = ui.tab === 'analytics' && state.videos.some(v => v.id === id && v.yt) ? id : null;
   lastChannelHash = location.hash || '#/home';
@@ -915,6 +998,7 @@ function renderHome(body) {
       <div class="stat"><b>${done.length}</b><span>готово</span></div>
       <div class="stat"><b>${avg}%</b><span>средняя готовность</span></div>
     </div>
+    ${yppHtml()}
     ${deadlinesHtml()}
     <div class="featured" data-act="open" data-id="${f.id}">
       ${thumbHtml(f)}
@@ -926,7 +1010,7 @@ function renderHome(body) {
         <div class="steps">${f.stages.map(s => `<span class="step ${s.done ? 'on' : ''}">${s.done ? '✓ ' : ''}${esc(s.name)}</span>`).join('')}</div>
       </div>
     </div>
-    ${shelf('В работе', work)}${shelf('Не начатые', idea)}${shelf('Готовые', done)}`;
+    ${shelf('В работе', work)}${hotShelfHtml()}${shelf('Не начатые', idea)}${shelf('Готовые', done)}`;
 }
 /* ================= страница видео ================= */
 const curStage = {};   // какой этап открыт у каждого видео
@@ -1293,6 +1377,7 @@ async function syncYouTube(btn) {
     const st = ch.statistics || {};
     c.yt = {id: ch.id, subs: +st.subscriberCount || 0, hiddenSubs: !!st.hiddenSubscriberCount, views: +st.viewCount || 0,
       videos: +st.videoCount || 0, fetchedAt: Date.now()};
+    channelPoint(c);
     const ava = ch.snippet?.thumbnails?.high?.url || ch.snippet?.thumbnails?.default?.url;
     // аватар и баннер берём с YouTube, если пользователь не загрузил свои вручную
     if (ava && !c.avatarCustom && c.avatarSrc !== ava) {
@@ -1362,6 +1447,7 @@ async function autoSyncYouTube() {
     const st = ch.statistics || {};
     c.yt = {...c.yt, id: ch.id, subs: +st.subscriberCount || 0, hiddenSubs: !!st.hiddenSubscriberCount, views: +st.viewCount || 0,
       videos: +st.videoCount || 0, fetchedAt: Date.now()};
+    channelPoint(c);
     await ytRefresh(state.videos);
     const uploads = ch.contentDetails?.relatedPlaylists?.uploads;
     const known = new Set([...state.videos.map(v => ytIdFrom(v.link)).filter(Boolean), ...state.ytSkip]);
@@ -1925,6 +2011,7 @@ async function loadAnalytics(btn) {
   let reachResult = 0;
   try { await fetchAnalytics(days); } catch (e) { errors.push(e.message); }
   try { reachResult = await fetchReach(); } catch (e) { errors.push('CTR: ' + e.message); }
+  try { await fetchYpp(); } catch (e) { errors.push('Часы для монетизации: ' + e.message); }
   touch();
   busy(btn, false);
   if (ui.tab === 'analytics' && !getVideo()) renderTab();
@@ -2352,6 +2439,10 @@ function renderGuide() {
     ${item('#/calendar', '<i class="g-ico">📅</i>', 'Календарь', page === 'calendar')}
     ${item('#/analytics', '<i class="g-ico">📊</i>', 'Аналитика', page === 'analytics')}
     <div class="g-sep"></div>
+    <div class="g-title"><span>Инструменты</span></div>
+    ${[['lab', '🧪', 'Лаборатория превью'], ['hot', '🔥', 'Выстрелило'], ['radar', '📡', 'Радар ниши'], ['asks', '💬', 'Запросы зрителей'], ['game', '🎯', 'Тренажёр чутья']]
+      .map(([k, ico, t]) => item('#/' + k, `<i class="g-ico">${ico}</i>`, t, page === k)).join('')}
+    <div class="g-sep"></div>
     <div class="g-title"><span>Конкуренты</span><button class="icon-btn g-add" data-act="rivaladd" title="Добавить конкурента">＋</button></div>
     ${state.competitors.length ? state.competitors.map(c => item('#/rival/' + c.id,
       c.avatar ? `<img src="${esc(c.avatar)}" alt="" referrerpolicy="no-referrer">` : '<i class="g-ico">👤</i>', c.title || c.handle,
@@ -2611,6 +2702,7 @@ function renderRivalVideo(c, rv) {
           <div><b>${esc(c.title)}</b><small>${c.hiddenSubs ? '' : subsText(c.subs)}</small></div></a>
         <button class="pill white" data-act="rivalcopy" data-cid="${c.id}" data-vid="${rv.id}">📋 Скопировать для чата</button>
         <button class="pill" data-act="copythumb" data-src="${rivalThumb(rv.id, 'hqdefault')}">🖼 Превью</button>
+        ${ideaBtn('yt:' + rv.id, `data-cid="${c.id}" data-vid="${rv.id}"`)}
       </div>
       <section class="yt-box">
         <div class="yt-head"><h3>📊 Статистика</h3><span class="muted">обновлено ${ago(c.fetchedAt)}</span></div>
@@ -2687,6 +2779,683 @@ function rivalVideoPrompt(c, rv, comments) {
   return L.join('\n');
 }
 
+/* ================= инструменты: идеи, «выстрелило», радар, запросы зрителей, тренажёр, монетизация ================= */
+const TOOL_PAGES = {lab: renderLab, game: renderGame, hot: renderHot, radar: renderRadar, asks: renderAsks};
+const setChip = (k, v, text, on) => `<button class="chip ${on ? 'active' : ''}" data-act="set" data-k="${k}" data-v="${v}">${text}</button>`;
+const moreBtn = (k, left) => left > 0 ? `<div class="more-row"><button class="pill" data-act="more" data-k="${k}">Показать ещё (осталось ${left})</button></div>` : '';
+const fmt1 = n => n.toLocaleString('ru-RU', {maximumFractionDigits: 1});
+const toolHead = (title, sub) => `<div class="tool-head"><h1>${title}</h1><div class="muted">${sub}</div></div>`;
+function seeded(seed) { return () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296; }
+function shuffled(arr, seed) {
+  const r = seeded(seed), a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+// Все ролики конкурентов одним списком (без трансляций и анонсов)
+function rivalPool(kind) {
+  const out = [];
+  for (const c of state.competitors) for (const v of c.videos)
+    if (!v.upcoming && !v.onAir && kindOf(v) !== 'live' && (!kind || kindOf(v) === kind)) out.push({c, v, x: xOf(c, v), t: Date.parse(v.publishedAt) || 0});
+  return out;
+}
+
+/* ----- идеи: новое видео без готовых этапов; inspo помнит источник, чтобы не добавить одно и то же дважды ----- */
+const hasIdea = key => state.videos.some(v => v.inspo === key);
+const ideaBtn = (key, attrs) => hasIdea(key) ? '<span class="pill idea-on">✓ В идеях</span>' : `<button class="pill" data-act="toidea" ${attrs}>💡 В идеи</button>`;
+function addIdea(key, kind, title, notes) {
+  if (hasIdea(key)) return toast('Эта идея уже в планере');
+  const v = makeVideo(kind === 'short' ? 'short' : 'video', title.replace(/\s+/g, ' ').trim().slice(0, 100));
+  Object.assign(v, {notes, inspo: key});
+  state.videos.unshift(v);
+  touch();
+  toast('💡 Добавлено в идеи — на главной в «Не начатых»', 4000);
+}
+
+/* ----- 🔥 выстрелило у конкурентов ----- */
+function hotList(days, minX, kind) {
+  const from = Date.now() - days * 864e5;
+  return rivalPool(kind === 'all' ? '' : kind).filter(o => o.t >= from && o.x >= minX).sort((a, b) => b.x - a.x);
+}
+function hotCardHtml({c, v, x}) {
+  return `<div class="card" data-act="rivalvideo" data-cid="${c.id}" data-vid="${v.id}">
+    <div class="thumb"><img class="thumb-img" src="${rivalThumb(v.id)}" alt="" loading="lazy">${xBadge(x)}<span class="badge">${fmtDur(v.duration)}</span></div>
+    <div class="card-body"><div class="card-text">
+      <h3 class="card-title">${esc(v.title)}</h3>
+      <div class="card-meta">${esc(c.title)}</div>
+      <div class="card-meta">${viewsText(v.views)} • ${ago(Date.parse(v.publishedAt))}</div>
+      <div class="idea-row">${ideaBtn('yt:' + v.id, `data-cid="${c.id}" data-vid="${v.id}"`)}</div>
+    </div></div>
+  </div>`;
+}
+function hotShelfHtml() {
+  const list = hotList(14, 2, 'all').slice(0, 4);
+  return list.length ? `<section class="shelf"><h2>🔥 Выстрелило у конкурентов <small>за 2 недели</small>
+    <a class="pill" href="#/hot" style="margin-left:auto">Все →</a></h2><div class="grid">${list.map(hotCardHtml).join('')}</div></section>` : '';
+}
+function renderHot() {
+  const h = ui.hot ||= {days: 30, minX: 2, kind: 'all', show: 48}, list = hotList(h.days, h.minX, h.kind);
+  document.title = 'Выстрелило у конкурентов';
+  app.innerHTML = `<div class="page">
+    ${toolHead('🔥 Выстрелило у конкурентов', 'Ролики, которые набрали намного больше обычного для своего канала. «×» — во сколько раз больше медианы канала.')}
+    <div class="chips">
+      ${[[7, '7 дней'], [30, '30 дней'], [90, '90 дней'], [365, 'Год']].map(([d, t]) => setChip('hot.days', d, t, h.days === d)).join('')}
+      <span class="rt-sep"></span>${[[1.5, '×1,5+'], [2, '×2+'], [3, '×3+']].map(([x, t]) => setChip('hot.minX', x, t, h.minX === x)).join('')}
+      <span class="rt-sep"></span>${[['all', 'Все'], ['video', 'Видео'], ['short', 'Shorts']].map(([k, t]) => setChip('hot.kind', k, t, h.kind === k)).join('')}
+    </div>
+    ${list.length ? `<div class="grid">${list.slice(0, h.show).map(hotCardHtml).join('')}</div>${moreBtn('hot', list.length - h.show)}`
+      : `<div class="empty"><div class="big">🧊</div><h3>${state.competitors.length ? 'За этот период ничего не выстрелило' : 'Сначала добавь конкурентов'}</h3>
+        <div>${state.competitors.length ? 'Попробуй период подлиннее или порог пониже' : 'Нажми ＋ у «Конкуренты» в левой панели'}</div></div>`}
+  </div>`;
+}
+
+/* ----- 💰 путь к монетизации ----- */
+const YPP = {subs: 1000, hours: 4000, shorts: 10e6};
+function channelPoint(c) { // замеры подписчиков — для прогноза, даже без входа в Google
+  const h = c.ytHistory ||= [], p = {t: Date.now(), subs: c.yt.subs, views: c.yt.views};
+  if (h.length && p.t - h[h.length - 1].t < 3600e3) h[h.length - 1] = p; else h.push(p);
+  if (h.length > 600) h.splice(0, h.length - 600);
+}
+function subsPerDay() {
+  const an = state.analytics;
+  if (an?.daily?.length >= 7) return {rate: sum(an.daily, 'subs') / an.daily.length, src: `по Analytics за ${an.daily.length} дн.`};
+  const h = state.channel.ytHistory || [], last = h[h.length - 1], first = last && h.find(p => last.t - p.t <= 60 * 864e5);
+  if (first && last.t - first.t >= 5 * 864e5) return {rate: (last.subs - first.subs) / ((last.t - first.t) / 864e5), src: 'по замерам планера'};
+  return null;
+}
+async function fetchYpp() {
+  const end = isoPlus(todayIso(), -1);
+  const q = (days, p) => gGet('https://youtubeanalytics.googleapis.com/v2/reports?' +
+    new URLSearchParams({ids: 'channel==MINE', startDate: isoPlus(end, -(days - 1)), endDate: end, ...p}));
+  // часы для монетизации считаются без Shorts — поэтому делим по типу контента (если YouTube не отдал разбивку — берём всё)
+  const byType = days => q(days, {metrics: 'views,estimatedMinutesWatched', dimensions: 'creatorContentType'}).then(tableRowsOf)
+    .catch(() => q(days, {metrics: 'views,estimatedMinutesWatched'}).then(d => tableRowsOf(d).map(r => ({...r, creatorContentType: 'ALL'}))));
+  const [year, d90, d28] = await Promise.all([byType(365), byType(90), byType(28)]);
+  const longMin = rows => rows.filter(r => r.creatorContentType !== 'SHORTS').reduce((s, r) => s + (r.estimatedMinutesWatched || 0), 0);
+  state.ypp = {hours: longMin(year) / 60, hoursPerDay: longMin(d28) / 60 / 28, fetchedAt: Date.now(),
+    shortsViews: d90.filter(r => r.creatorContentType === 'SHORTS').reduce((s, r) => s + (r.views || 0), 0), exact: !year.some(r => r.creatorContentType === 'ALL')};
+}
+function yppHtml() {
+  const c = state.channel, y = state.ypp;
+  if (!c.yt || c.yt.hiddenSubs) return '';
+  const row = (label, val, goal, text, note) => `<div class="ypp-row"><span>${label}</span>
+    <div><div class="ypp-bar"><i style="width:${Math.min(100, val / goal * 100)}%"></i></div></div><small>${text}${note ? ' · ' + note : ''}</small></div>`;
+  const subs = c.yt.subs, sr = subsPerDay(), left = YPP.subs - subs;
+  const subsNote = left <= 0 ? '✓ есть' : !sr ? 'прогноз появится через несколько дней замеров'
+    : sr.rate <= 0 ? `за последнее время подписчиков не прибавилось (${sr.src})`
+    : `≈ +${fmt1(sr.rate)} в день (${sr.src}) → ${left / sr.rate > 3 * 365 ? 'при таком темпе 1000 наберётся дольше чем за три года'
+      : '1000 примерно ' + fmtFull(Date.now() + left / sr.rate * 864e5)}`;
+  let hours = row('Часы просмотра за год', 0, 1, '—', 'подключи Google во вкладке «Аналитика», и здесь появятся часы');
+  if (y) {
+    const year = y.hoursPerDay * 365;
+    hours = row('Часы просмотра за год', y.hours, YPP.hours, `${fullNum(Math.round(y.hours))} из 4000${y.exact ? ' (без Shorts)' : ''}`,
+      y.hours >= YPP.hours ? '✓ есть' : `сейчас ≈ ${fmt1(y.hoursPerDay)} ч в день — за год это ~${fullNum(Math.round(year))} ч${year >= YPP.hours ? ', темпа хватает' : ', темпа пока не хватает'}`) +
+      (y.exact ? row('…или Shorts за 90 дней', y.shortsViews, YPP.shorts, `${compact(y.shortsViews)} из 10 млн просмотров`, '') : '');
+  }
+  return `<div class="box"><h3>💰 Путь к монетизации</h3><div class="sub">Нужно 1000 подписчиков и 4000 часов просмотра за год (или 10 млн просмотров Shorts за 90 дней).
+    Первая ступень — 500 подписчиков — в некоторых странах открывает спонсорство и Super Thanks.</div>
+    <div class="ypp">${row('Подписчики', subs, YPP.subs, `${fullNum(subs)} из 1000`, subsNote)}${hours}</div></div>`;
+}
+
+/* ----- 📡 радар ниши: поиск по всему YouTube ----- */
+const radarChannels = {}; // полные данные каналов из последнего поиска — чтобы добавить в конкуренты без лишнего запроса
+const radarX = o => o.subs == null ? null : o.views / Math.max(o.subs, 500);
+async function runRadar(btn) {
+  const r = state.radar;
+  if (!secrets.ytKey) { openSettings(true); return toast('Сначала добавь ключ YouTube API'); }
+  if (!r.queries.length) return toast('Добавь хотя бы одно ключевое слово');
+  busy(btn, true, '⏳ Ищу…');
+  try {
+    const after = new Date(Date.now() - r.days * 864e5).toISOString(), found = new Map();
+    for (const q of r.queries) {
+      const d = await ytGet('search', {part: 'snippet', type: 'video', q, publishedAfter: after, order: 'viewCount', maxResults: 50});
+      for (const it of d.items || []) if (it.id?.videoId && !found.has(it.id.videoId)) found.set(it.id.videoId, q);
+    }
+    const ids = [...found.keys()], vids = [], chs = {};
+    for (let i = 0; i < ids.length; i += 50) vids.push(...(await ytGet('videos', {part: 'snippet,statistics,contentDetails', id: ids.slice(i, i + 50).join(',')})).items || []);
+    const cids = [...new Set(vids.map(v => v.snippet.channelId))];
+    for (let i = 0; i < cids.length; i += 50)
+      for (const ch of (await ytGet('channels', {part: 'snippet,statistics,contentDetails,brandingSettings', id: cids.slice(i, i + 50).join(',')})).items || []) chs[ch.id] = ch;
+    Object.assign(radarChannels, chs);
+    r.results = vids.filter(v => v.snippet.channelId !== state.channel.yt?.id).map(v => {
+      const st = chs[v.snippet.channelId]?.statistics || {};
+      return {id: v.id, title: v.snippet.title, at: v.snippet.publishedAt, dur: isoDur(v.contentDetails?.duration), views: +v.statistics?.viewCount || 0,
+        cid: v.snippet.channelId, ch: v.snippet.channelTitle, subs: st.hiddenSubscriberCount ? null : +st.subscriberCount || 0, q: found.get(v.id)};
+    });
+    r.fetchedAt = Date.now();
+    touch();
+    rerender();
+    toast(`✓ Найдено ${plural(r.results.length, ['ролик', 'ролика', 'роликов'])}`);
+  } catch (e) { toast(e.message, 7000); busy(btn, false); }
+}
+function radarCardHtml(o) {
+  const x = radarX(o), known = state.competitors.some(c => c.id === o.cid) || o.cid === state.channel.yt?.id;
+  return `<div class="card">
+    <a class="thumb" href="https://www.youtube.com/watch?v=${o.id}" target="_blank" rel="noopener" style="display:block"><img class="thumb-img" src="${rivalThumb(o.id)}" alt="" loading="lazy">
+      ${x == null ? '' : `<span class="badge xb ${x >= 10 ? 'hot' : x >= 3 ? 'up' : ''}" title="Просмотры ÷ подписчики канала">${x >= 10 ? '🔥 ' : ''}${xText(x)}</span>`}<span class="badge">${fmtDur(o.dur)}</span></a>
+    <div class="card-body"><div class="card-text">
+      <h3 class="card-title">${esc(o.title)}</h3>
+      <div class="card-meta">${esc(o.ch)} • ${o.subs == null ? 'подписчики скрыты' : subsText(o.subs)}</div>
+      <div class="card-meta">${viewsText(o.views)} • ${ago(Date.parse(o.at))} • «${esc(o.q)}»</div>
+      <div class="idea-row">${ideaBtn('yt:' + o.id, `data-rid="${o.id}"`)}${known ? '' : `<button class="pill" data-act="radarrival" data-cid="${o.cid}">＋ В конкуренты</button>`}</div>
+    </div></div>
+  </div>`;
+}
+function renderRadar() {
+  const r = state.radar, f = ui.radar ||= {kind: 'all', sort: 'x', show: 48};
+  const list = r.results.filter(o => o.views >= 1000 && (f.kind === 'all' || (o.dur <= 60 ? 'short' : 'video') === f.kind))
+    .sort(f.sort === 'views' ? (a, b) => b.views - a.views : (a, b) => (radarX(b) ?? -1) - (radarX(a) ?? -1));
+  document.title = 'Радар ниши';
+  app.innerHTML = `<div class="page">
+    ${toolHead('📡 Радар ниши', 'Поиск по всему YouTube: какие ролики по твоим темам набрали много просмотров у маленьких каналов. «×» — просмотры, делённые на подписчиков канала.')}
+    <form class="radar-form" id="radarForm"><input name="q" placeholder="Ключевое слово, например «roblox ai»" autocomplete="off"><button class="pill white">＋ Добавить</button></form>
+    <div class="chips">${r.queries.map(q => `<span class="chip active">${esc(q)}<button data-act="radardel" data-q="${esc(q)}" title="Убрать">✕</button></span>`).join('')
+      || '<span class="muted">Добавь 2–5 слов или фраз, по которым тебя ищут зрители</span>'}</div>
+    <div class="chips">
+      ${[[7, '7 дней'], [30, '30 дней'], [90, '90 дней']].map(([d, t]) => `<button class="chip ${r.days === d ? 'active' : ''}" data-act="radardays" data-v="${d}">${t}</button>`).join('')}
+      <button class="pill white" data-act="radarrun">📡 Искать</button>
+      <span class="muted">≈ ${r.queries.length * 100 + 3} из 10 000 единиц дневного лимита YouTube API</span>
+    </div>
+    ${r.results.length ? `<div class="chips">
+        ${[['all', 'Все'], ['video', 'Видео'], ['short', 'Shorts']].map(([k, t]) => setChip('radar.kind', k, t, f.kind === k)).join('')}
+        <select id="radarSort">${[['x', 'По × к подписчикам'], ['views', 'По просмотрам']].map(([k, t]) => `<option value="${k}" ${f.sort === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      </div>
+      <div class="grid">${list.slice(0, f.show).map(radarCardHtml).join('')}</div>${moreBtn('radar', list.length - f.show)}
+      <div class="an-note">Поиск ${ago(r.fetchedAt)} · показаны ролики от 1000 просмотров · у каналов меньше 500 подписчиков «×» считается как от 500</div>` : ''}
+  </div>`;
+}
+
+/* ----- 💬 запросы зрителей из комментариев ----- */
+const ASK_RE = /\b(can|could|would|will) (you|u)\b|\bpl(ease|s|z)\b|\byou should\b|\bshould (do|make|try)\b|\bnext (video|time|episode|one)\b|\b(do|make) (a|an|another|more|one)\b|\btry (to|making|using|with|it)\b|\bwhat if\b|\bpart ?2\b|\bi (want|wish|would love|'d love) (to see|you)\b|\bvs\.?(?=\s)|\bversus\b|сделай|попробуй|можешь|можете|а можно|сними|следующ|продолжени|часть ?2|хочу увидеть|было бы круто/i;
+async function loadAsks(btn) {
+  if (!secrets.ytKey) { openSettings(true); return toast('Сначала добавь ключ YouTube API'); }
+  const own = state.channel.yt?.id, sources = published(null).slice(0, 30).map(v => ({vid: v.yt.id, title: v.yt.title || v.title, src: 'own', pid: v.id}));
+  for (const c of state.competitors) {
+    const vids = c.videos.filter(v => !v.upcoming && kindOf(v) !== 'live');
+    const top = vids.filter(v => Date.now() - Date.parse(v.publishedAt) < 180 * 864e5).sort((a, b) => (xOf(c, b) || 0) - (xOf(c, a) || 0)).slice(0, 5);
+    for (const v of new Set([...vids.slice(0, 5), ...top])) sources.push({vid: v.id, title: v.title, src: 'rival', cid: c.id, ch: c.title});
+  }
+  busy(btn, true, '⏳ Читаю комментарии…');
+  const items = [];
+  let done = 0, lastErr = '';
+  for (let i = 0; i < sources.length; i += 6) await Promise.all(sources.slice(i, i + 6).map(async s => {
+    try {
+      const d = await ytGet('commentThreads', {part: 'snippet', videoId: s.vid, order: 'relevance', maxResults: 100, textFormat: 'plainText'});
+      for (const it of d.items || []) {
+        const k = it.snippet.topLevelComment.snippet, text = String(k.textDisplay || '').trim(), author = k.authorChannelId?.value;
+        if ((author && (author === own || author === s.cid)) || text.length < 12 || text.length > 600 || !ASK_RE.test(text)) continue;
+        items.push({text, likes: k.likeCount || 0, at: k.publishedAt, author: k.authorDisplayName, ...s});
+      }
+    } catch (e) { lastErr = e.message; } // у части роликов комментарии просто отключены
+    if (btn) btn.textContent = `⏳ ${++done} из ${sources.length}`;
+  }));
+  busy(btn, false);
+  if (!items.length && lastErr) return toast(lastErr, 7000);
+  state.asks = {fetchedAt: Date.now(), items: items.sort((a, b) => b.likes - a.likes).slice(0, 200)};
+  touch();
+  rerender();
+  toast(`✓ Найдено ${plural(state.asks.items.length, ['запрос', 'запроса', 'запросов'])}`);
+}
+function renderAsks() {
+  const a = state.asks, f = ui.asks ||= {src: 'all', show: 48}, mark = new RegExp(ASK_RE.source, 'gi');
+  const list = (a?.items || []).map((it, i) => ({it, i})).filter(({it}) => f.src === 'all' || it.src === f.src);
+  document.title = 'Запросы зрителей';
+  app.innerHTML = `<div class="page">
+    ${toolHead('💬 Запросы зрителей', 'Комментарии, где зрители просят что-то снять или попробовать, — под твоими видео и у конкурентов. Сверху — с большим числом лайков.')}
+    <div class="chips">${[['all', 'Все'], ['own', 'У меня'], ['rival', 'У конкурентов']].map(([k, t]) => setChip('asks.src', k, t, f.src === k)).join('')}
+      <button class="pill white" data-act="asksload" style="margin-left:auto">🔄 ${a ? 'Обновить' : 'Собрать запросы'}</button></div>
+    ${list.length ? `<div class="ask-list">${list.slice(0, f.show).map(({it, i}) => `<div class="ask">
+        <div class="ask-text">${esc(it.text).replace(mark, m => `<mark>${m}</mark>`)}</div>
+        <div class="ask-meta muted">👍 ${fullNum(it.likes)} · ${esc(it.author)} · ${ago(Date.parse(it.at))} ·
+          ${it.src === 'own' ? `<a href="#/watch/${it.pid}">${esc(it.title)}</a>` : `<a href="#/rival/${it.cid}/${it.vid}">${esc(it.title)}</a> · ${esc(it.ch)}`}</div>
+        ${ideaBtn(`c:${it.vid}:${it.at}`, `data-ask="${i}"`)}</div>`).join('')}</div>${moreBtn('asks', list.length - f.show)}`
+      : `<div class="empty"><div class="big">💬</div><h3>${a ? 'Запросов не нашлось' : 'Запросы ещё не собраны'}</h3>
+        <div>Нажми «${a ? 'Обновить' : 'Собрать запросы'}» — планер прочитает комментарии твоих видео и свежих роликов конкурентов</div></div>`}
+    ${a ? `<div class="an-note">Собрано ${ago(a.fetchedAt)} · ищу фразы вроде «can you», «try», «next video», «vs», «сделай», «попробуй»</div>` : ''}
+  </div>`;
+}
+
+/* ----- 🎯 тренажёр чутья: какое из двух видео одного канала набрало больше ----- */
+function gamePair(kind) {
+  const byCh = new Map();
+  for (const o of rivalPool(kind)) if (Date.now() - o.t > 14 * 864e5 && o.v.views) (byCh.get(o.c) || byCh.set(o.c, []).get(o.c)).push(o);
+  const chans = [...byCh.values()].filter(l => l.length >= 4);
+  for (let tries = 0; chans.length && tries < 300; tries++) {
+    const l = chans[Math.floor(Math.random() * chans.length)], a = l[Math.floor(Math.random() * l.length)], b = l[Math.floor(Math.random() * l.length)];
+    // сравниваем ролики близкого возраста и с заметной разницей — чтобы решала упаковка, а не случай
+    if (a !== b && Math.abs(a.t - b.t) <= 90 * 864e5 && Math.max(a.v.views, b.v.views) >= 2 * Math.min(a.v.views, b.v.views)) return [a, b];
+  }
+  return null;
+}
+function renderGame() {
+  const g = ui.game ||= {kind: 'video'}, s = state.game ||= {played: 0, correct: 0, streak: 0, best: 0};
+  if (!g.pair || g.pairKind !== g.kind) Object.assign(g, {pair: gamePair(g.kind), pick: null, pairKind: g.kind});
+  const picked = g.pick != null, winner = g.pair && (g.pair[0].v.views >= g.pair[1].v.views ? 0 : 1);
+  document.title = 'Тренажёр чутья';
+  app.innerHTML = `<div class="page">
+    ${toolHead('🎯 Тренажёр чутья', 'Два ролика одного канала, вышли с разницей не больше трёх месяцев. Одно набрало минимум вдвое больше. Угадай какое — по превью и названию.')}
+    <div class="chips">${[['video', 'Видео'], ['short', 'Shorts']].map(([k, t]) => setChip('game.kind', k, t, g.kind === k)).join('')}
+      <span class="muted" style="margin-left:auto">Угадано ${s.correct} из ${s.played}${s.played ? ` (${Math.round(s.correct / s.played * 100)}%, наугад было бы 50%)` : ''} · серия ${s.streak} · рекорд ${s.best}</span></div>
+    ${!g.pair ? '<div class="empty"><div class="big">🎯</div><h3>Не из чего составить пару</h3><div>Нужны конкуренты с роликами старше двух недель</div></div>'
+      : `<div class="game">${g.pair.map(({c, v, x}, i) => `<div class="card ${picked ? (i === winner ? 'win' : i === g.pick ? 'lose' : '') : ''}" data-act="gamepick" data-i="${i}">
+          <div class="thumb"><img class="thumb-img" src="${rivalThumb(v.id)}" alt=""><span class="badge">${fmtDur(v.duration)}</span></div>
+          <div class="card-body"><div class="card-text"><h3 class="card-title">${esc(v.title)}</h3><div class="card-meta">${esc(c.title)}</div>
+            ${picked ? `<div class="game-res">${fullNum(v.views)} просмотров ${x ? `· ${xText(x)} к медиане` : ''}</div>` : ''}</div></div></div>`).join('')}</div>
+        ${picked ? `<div class="chips"><b>${g.pick === winner ? '✓ Верно!' : '✗ Мимо'}</b><button class="pill white" data-act="gamenext">Дальше →</button>
+          <a class="pill" href="#/rival/${g.pair[winner].c.id}/${g.pair[winner].v.id}">Разобрать победителя</a></div>` : ''}`}
+  </div>`;
+}
+
+/* ----- 🧪 лаборатория превью ----- */
+const labCache = new Map(); // адрес картинки → Promise<ImageBitmap>
+const proxied = url => '/api/image?url=' + encodeURIComponent(url);
+function loadBitmap(src) {
+  if (!labCache.has(src)) labCache.set(src, fetch(src, src.startsWith('/api/') ? {headers: {'x-planer': '1'}} : {})
+    .then(r => { if (!r.ok) throw new Error('картинка не загрузилась'); return r.blob(); }).then(b => createImageBitmap(b))
+    .catch(e => { labCache.delete(src); throw e; }));
+  return labCache.get(src);
+}
+function pixels(bmp, w, h) {
+  const cx = Object.assign(document.createElement('canvas'), {width: w, height: h}).getContext('2d', {willReadFrequently: true});
+  cx.drawImage(bmp, 0, 0, w, h);
+  return cx.getImageData(0, 0, w, h).data;
+}
+// Яркость, контраст, насыщенность, детализация (перепады яркости) и доли цветов по 64 корзинам
+const featCache = new WeakMap();
+function imgFeatures(bmp) {
+  if (featCache.has(bmp)) return featCache.get(bmp);
+  const W = 160, H = 90, n = W * H, d = pixels(bmp, W, H), L = new Float32Array(n), hist = new Float32Array(64);
+  let sL = 0, sL2 = 0, sS = 0, e = 0;
+  for (let i = 0; i < n; i++) {
+    const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2], mx = Math.max(r, g, b), l = 0.299 * r + 0.587 * g + 0.114 * b;
+    L[i] = l; sL += l; sL2 += l * l; sS += mx ? (mx - Math.min(r, g, b)) / mx : 0;
+    hist[(r >> 6) * 16 + (g >> 6) * 4 + (b >> 6)] += 1 / n;
+  }
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+    const i = y * W + x;
+    e += Math.hypot(L[i - W + 1] + 2 * L[i + 1] + L[i + W + 1] - L[i - W - 1] - 2 * L[i - 1] - L[i + W - 1],
+      L[i + W - 1] + 2 * L[i + W] + L[i + W + 1] - L[i - W - 1] - 2 * L[i - W] - L[i - W + 1]);
+  }
+  const mean = sL / n, f = {bright: mean / 2.55, contrast: Math.sqrt(Math.max(0, sL2 / n - mean * mean)) / 1.275, sat: sS / n * 100,
+    detail: e / ((W - 2) * (H - 2)) / 4, hist};
+  featCache.set(bmp, f);
+  return f;
+}
+const binColor = i => `rgb(${(i >> 4) * 85},${(i >> 2 & 3) * 85},${(i & 3) * 85})`;
+const topColors = (hist, n) => [...hist].map((w, i) => [i, w]).sort((a, b) => b[1] - a[1]).slice(0, n).filter(([, w]) => w > 0.02);
+const swatches = hist => `<div class="swatches">${topColors(hist, 6).map(([i, w]) => `<i style="background:${binColor(i)}" title="${Math.round(w * 100)}%">${Math.round(w * 100)}</i>`).join('')}</div>`;
+
+// БПФ по основанию 2 (на месте) и двумерное — для карты внимания
+function fft(re, im, inv) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = 2 * Math.PI / len * (inv ? 1 : -1), wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) for (let k = 0, cr = 1, ci = 0; k < len / 2; k++) {
+      const a = i + k, b = a + len / 2, tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
+      re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+      [cr, ci] = [cr * wr - ci * wi, cr * wi + ci * wr];
+    }
+  }
+}
+function fft2(re, im, N, inv) {
+  const r = new Float64Array(N), m = new Float64Array(N);
+  for (const cols of [false, true]) for (let a = 0; a < N; a++) {
+    for (let b = 0; b < N; b++) { const k = cols ? b * N + a : a * N + b; r[b] = re[k]; m[b] = im[k]; }
+    fft(r, m, inv);
+    for (let b = 0; b < N; b++) { const k = cols ? b * N + a : a * N + b; re[k] = r[b]; im[k] = m[b]; }
+  }
+}
+function boxBlur(a, N, rad) {
+  const t = new Float64Array(a.length);
+  for (const vert of [false, true]) {
+    const src = vert ? t : a, dst = vert ? a : t;
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      let s = 0, c = 0;
+      for (let k = -rad; k <= rad; k++) {
+        const xx = vert ? x : x + k, yy = vert ? y + k : y;
+        if (xx >= 0 && xx < N && yy >= 0 && yy < N) { s += src[yy * N + xx]; c++; }
+      }
+      dst[y * N + x] = s / c;
+    }
+  }
+}
+// Карта внимания методом «спектрального остатка» (Hou, Zhang, 2007) — обычная математика, без нейросетей
+const salCache = new WeakMap();
+function saliency(bmp) {
+  if (salCache.has(bmp)) return salCache.get(bmp);
+  const N = 64, d = pixels(bmp, N, N), re = new Float64Array(N * N), im = new Float64Array(N * N), s = new Float64Array(N * N);
+  for (let i = 0; i < N * N; i++) re[i] = (0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]) / 255;
+  fft2(re, im, N, false);
+  const logA = re.map((v, i) => Math.log(Math.hypot(v, im[i]) + 1e-9)), ph = re.map((v, i) => Math.atan2(im[i], v)), avg = logA.slice();
+  boxBlur(avg, N, 1);
+  for (let i = 0; i < N * N; i++) { const m = Math.exp(logA[i] - avg[i]); re[i] = m * Math.cos(ph[i]); im[i] = m * Math.sin(ph[i]); }
+  fft2(re, im, N, true);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { // края карты у этого метода шумят — гасим рамку в 2 пикселя
+    const i = y * N + x;
+    s[i] = x < 2 || y < 2 || x >= N - 2 || y >= N - 2 ? 0 : re[i] * re[i] + im[i] * im[i];
+  }
+  for (let k = 0; k < 3; k++) boxBlur(s, N, 3);
+  const mx = Math.max(...s) || 1;
+  for (let i = 0; i < N * N; i++) s[i] /= mx;
+  salCache.set(bmp, s);
+  return s;
+}
+function drawHeat(canvas, sal) {
+  const N = 64, small = Object.assign(document.createElement('canvas'), {width: N, height: N}), sx = small.getContext('2d'), img = sx.createImageData(N, N);
+  for (let i = 0; i < N * N; i++) {
+    const v = sal[i];
+    img.data.set([255, Math.round(230 * (1 - v)), 0, Math.round(Math.pow(v, 1.1) * 240)], i * 4);
+  }
+  sx.putImageData(img, 0, 0);
+  const cx = canvas.getContext('2d');
+  cx.imageSmoothingEnabled = true;
+  cx.drawImage(small, 0, 0, canvas.width, canvas.height);
+}
+// Где на превью плашка длительности (и полоска «уже смотрели») — в долях ширины и высоты
+const BADGE_ZONE = {x: 0.82, y: 0.8};
+function salStats(sal) {
+  const N = 64, total = sal.reduce((a, b) => a + b, 0) || 1;
+  let zone = 0;
+  for (let y = Math.floor(BADGE_ZONE.y * N); y < N; y++) for (let x = Math.floor(BADGE_ZONE.x * N); x < N; x++) zone += sal[y * N + x];
+  const sorted = Array.from(sal).sort((a, b) => b - a), top = sorted.slice(0, Math.round(N * N * 0.1)).reduce((a, b) => a + b, 0);
+  return {zone: zone / total, zoneArea: (1 - BADGE_ZONE.x) * (1 - BADGE_ZONE.y), focus: top / total};
+}
+
+function labSubject() {
+  const l = ui.lab ||= {layout: 'home', light: false, seed: 1, imgs: {}, title: null};
+  let v = state.videos.find(x => x.id === l.vid);
+  if (!v) { v = state.videos.find(x => !x.yt && x.thumb) || state.videos.find(x => !x.yt) || state.videos[0]; l.vid = v?.id; l.title = null; }
+  return v;
+}
+const labImg = v => ui.lab.imgs[v.id] || v.thumb;
+const labTitle = v => ui.lab.title ?? v.title;
+function labDuration(v) {
+  if (v.yt) return fmtDur(v.yt.duration);
+  const words = v.stages.filter(s => /сценар/i.test(s.name)).reduce((n, s) => n + (stageText(s).match(/\S+/g) || []).length, 0);
+  return words >= 150 ? fmtDur(Math.round(words / 130 * 60)) : '10:00';
+}
+function labItems(v, count) {
+  const kind = v.type === 'short' ? 'short' : 'video', from = Date.now() - 180 * 864e5, l = ui.lab;
+  const others = shuffled(rivalPool(kind).filter(o => o.t >= from), l.seed).slice(0, count - 1).map(({c, v: rv}) => ({thumb: rivalThumb(rv.id),
+    title: rv.title, ch: c.title, ava: c.avatar, views: viewsText(rv.views), when: ago(Date.parse(rv.publishedAt)), dur: fmtDur(rv.duration)}));
+  const me = {me: true, thumb: labImg(v), grad: grad(v.id), title: labTitle(v) || 'Без названия', ch: state.channel.name, ava: state.channel.avatar,
+    views: v.yt ? viewsText(v.yt.views) : 'Новое видео', when: v.yt?.publishedAt ? ago(Date.parse(v.yt.publishedAt)) : 'только что', dur: labDuration(v)};
+  others.splice(Math.floor(seeded(l.seed + 7)() * Math.min(count, others.length + 1)), 0, me);
+  return others;
+}
+function lfCard(it, layout) {
+  const th = it.thumb ? `<img src="${esc(it.thumb)}" alt="" loading="lazy">` : `<div class="ph" style="background:${it.grad};font-size:13px">${esc(it.title)}</div>`;
+  const ava = it.ava ? `<img class="lf-ava" src="${esc(it.ava)}" alt="" referrerpolicy="no-referrer">` : '<span class="lf-ava"></span>';
+  const meta = layout === 'phone' ? `<div class="lf-meta">${esc(it.ch)} · ${it.views} · ${it.when}</div>`
+    : `<div class="lf-meta">${esc(it.ch)}</div><div class="lf-meta">${it.views} • ${it.when}</div>`;
+  return `<div class="lf-card ${it.me ? 'lf-me' : ''}"><div class="lf-thumb">${th}<span class="lf-dur">${it.dur}</span></div>
+    <div class="lf-body">${layout === 'side' ? '' : ava}<div class="lf-text"><div class="lf-title">${esc(it.title)}</div>${meta}</div></div></div>`;
+}
+const LAYOUTS = {home: ['🖥 Главная', 6], phone: ['📱 Телефон', 6], side: ['▶ Рекомендуемые', 10], shorts: ['📱 Полка Shorts', 10]};
+// Сколько знаков названия видно в этой раскладке (отрисовываем невидимую карточку и подбираем длину)
+function titleFit(layout, title) {
+  const box = document.createElement('div');
+  box.className = `lf lf-${layout} lf-measure`;
+  box.innerHTML = lfCard({title, ch: '', views: '', when: '', dur: ''}, layout);
+  document.body.append(box);
+  const el = box.querySelector('.lf-title'), fits = t => { el.textContent = t; return el.scrollHeight <= el.clientHeight + 1; };
+  let n = title.length;
+  if (!fits(title)) {
+    let lo = 0, hi = title.length;
+    while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); if (fits(title.slice(0, mid) + '…')) lo = mid; else hi = mid - 1; }
+    n = lo;
+  }
+  box.remove();
+  return n;
+}
+
+const STOP = new Set(('the a an and or of to in on for with at by from is are was be it this that its as into so ' +
+  'и в во на с со к по за из у о об а но что как это для не же ли бы то').split(' '));
+const TITLE_PATTERNS = [['есть число', t => /\d/.test(t)], ['вопрос «?»', t => t.includes('?')], ['восклицание «!»', t => t.includes('!')],
+  ['«vs» / «против»', t => /\bvs\.?\b|\bversus\b|против/i.test(t)], ['слово КАПСОМ', t => /(^|[^\p{L}])\p{Lu}{3,}([^\p{L}]|$)/u.test(t)],
+  ['эмодзи', t => /\p{Extended_Pictographic}/u.test(t)], ['скобки', t => /[()[\]]/.test(t)], ['начинается с «I» / «я»', t => /^(i|я)[\s'’]/i.test(t)],
+  ['до 40 знаков', t => t.length <= 40], ['41–60 знаков', t => t.length > 40 && t.length <= 60], ['длиннее 60 знаков', t => t.length > 60]];
+function titleTerms(t) {
+  const w = t.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [], out = new Set();
+  w.forEach((a, i) => {
+    if (!STOP.has(a) && a.length > 1 && !/^\d+$/.test(a)) out.add(a);
+    if (w[i + 1] && !(STOP.has(a) && STOP.has(w[i + 1]))) out.add(a + ' ' + w[i + 1]);
+  });
+  return out;
+}
+// «Слова-магниты»: у роликов с каким словом медиана «иксов» выше. Иксы уже приведены к медиане своего канала, поэтому каналы сравнимы.
+function titleStats(kind) {
+  const pool = rivalPool(kind).filter(o => o.x != null), terms = new Map();
+  for (const o of pool) for (const t of titleTerms(o.v.title)) (terms.get(t) || terms.set(t, []).get(t)).push(o);
+  const minN = Math.max(4, Math.round(pool.length * 0.02));
+  const rows = [...terms].filter(([, l]) => l.length >= minN).map(([t, l]) => ({t, n: l.length, ch: new Set(l.map(o => o.c)).size,
+    x: median(l.map(o => o.x)), ex: l.slice().sort((a, b) => b.x - a.x).slice(0, 3).map(o => o.v.title)}));
+  const general = rows.filter(r => r.ch >= 2); // слово должно встречаться хотя бы у двух каналов, иначе это чья-то рубрика
+  return {n: pool.length, minN, map: new Map(rows.map(r => [r.t, r])),
+    magnets: general.filter(r => r.x >= 1.2).sort((a, b) => b.x - a.x).slice(0, 15),
+    anchors: general.filter(r => r.x <= 0.8).sort((a, b) => a.x - b.x).slice(0, 8),
+    patterns: TITLE_PATTERNS.map(([t, fn]) => { const l = pool.filter(o => fn(o.v.title)); return {t, fn, n: l.length, x: l.length >= 3 ? median(l.map(o => o.x)) : null}; })};
+}
+const xCls = x => x == null ? '' : x >= 1.2 ? 'hi' : x <= 0.8 ? 'lo' : '';
+const termChip = r => `<span class="${xCls(r.x)}" title="${esc(r.ex.join('\n'))}">${esc(r.t)} ${xText(r.x)} <small>· ${r.n}</small></span>`;
+
+function labTitleHtml(v, st) {
+  const title = labTitle(v) || '';
+  if (!title) return '<div class="muted">Впиши название сверху</div>';
+  const layouts = v.type === 'short' ? ['shorts'] : ['home', 'phone', 'side'];
+  const fit = layouts.map(k => { const n = titleFit(k, title); return `${LAYOUTS[k][0]}: ${n >= title.length ? '✓ целиком' : `<span class="late">видно ${n} из ${title.length}</span> — «${esc(title.slice(0, n))}…»`}`; });
+  const words = [...titleTerms(title)].map(t => st.map.get(t)).filter(Boolean).sort((a, b) => b.x - a.x);
+  const pats = st.patterns.filter(p => p.x != null && p.fn(title));
+  return `<div class="verdicts">${fit.map(f => `<div>${f}</div>`).join('')}</div>
+    <h4>Слова из твоего названия у конкурентов</h4>
+    <div class="word-chips">${words.map(termChip).join('') || '<span class="muted">Эти слова у конкурентов почти не встречаются — не с чем сравнить</span>'}</div>
+    <h4>Приёмы в твоём названии</h4>
+    <div class="word-chips">${pats.map(p => `<span class="${xCls(p.x)}">${p.t} ${xText(p.x)} <small>· ${p.n}</small></span>`).join('') || '<span class="muted">—</span>'}</div>`;
+}
+function labWordsHtml(st) {
+  if (st.n < 20) return '<div class="muted">Мало роликов конкурентов для статистики — добавь конкурентов или загрузи их историю.</div>';
+  return `<div class="sub">По ${plural(st.n, ['ролику', 'роликам', 'роликам'])} конкурентов. Число после «×» — медиана иксов роликов с этим словом, после точки — сколько таких роликов.
+      Слово учитывается, если встречается хотя бы у двух каналов. Наведи на слово — покажу лучшие примеры.</div>
+    <h4>🧲 Магниты</h4><div class="word-chips">${st.magnets.map(termChip).join('') || '<span class="muted">Явных магнитов нет</span>'}</div>
+    <h4>⚓ Якоря</h4><div class="word-chips">${st.anchors.map(termChip).join('') || '<span class="muted">Явных якорей нет</span>'}</div>
+    <h4>Приёмы</h4><div class="word-chips">${st.patterns.filter(p => p.x != null).map(p => `<span class="${xCls(p.x)}">${p.t} ${xText(p.x)} <small>· ${p.n}</small></span>`).join('')}</div>`;
+}
+
+function renderLab() {
+  const v = labSubject(), l = ui.lab;
+  document.title = 'Лаборатория превью';
+  if (!v) { app.innerHTML = `<div class="page">${toolHead('🧪 Лаборатория превью', '')}${emptyHtml('video')}</div>`; return; }
+  const layouts = v.type === 'short' ? ['shorts'] : ['home', 'phone', 'side'];
+  if (!layouts.includes(l.layout)) l.layout = layouts[0];
+  const items = labItems(v, LAYOUTS[l.layout][1]), st = titleStats(v.type === 'short' ? 'short' : 'video'), img = labImg(v);
+  app.innerHTML = `<div class="page">
+    ${toolHead('🧪 Лаборатория превью', 'Как превью и название смотрятся в ленте рядом с конкурентами, что видно на телефоне, куда посмотрит глаз и какие слова работают в нише. Без ИИ — только расчёты.')}
+    <div class="lab-top">
+      <select id="labVid">${state.videos.map(x => `<option value="${x.id}" ${x === v ? 'selected' : ''}>${x.yt ? '▶ ' : ''}${esc(x.title || 'Без названия')}</option>`).join('')}</select>
+      <input id="labTitle" value="${esc(labTitle(v))}" placeholder="Название для проверки" maxlength="100">
+      <button class="pill" data-act="labtitle" ${labTitle(v) !== v.title ? '' : 'hidden'}>💾 Сохранить название в видео</button>
+      <button class="pill" data-act="labimg">🖼 ${img ? 'Другой вариант превью' : 'Загрузить превью'}</button>
+      ${l.imgs[v.id] ? '<button class="pill white" data-act="labapply">✓ Сделать превью видео</button>' : ''}
+    </div>
+    <section class="box"><h3>В ленте</h3><div class="sub">Твоё видео спрятано среди свежих роликов конкурентов. Оно цепляет взгляд первым?</div>
+      <div class="chips">${layouts.map(k => setChip('lab.layout', k, LAYOUTS[k][0], l.layout === k)).join('')}
+        ${setChip('lab.light', '!', l.light ? '☀️ Светлая тема' : '🌙 Тёмная тема', false)}
+        <button class="chip" data-act="labshuffle">🔀 Перемешать</button><button class="chip" data-act="labfind">👁 Где моё?</button></div>
+      <div class="lf lf-${l.layout} ${l.light ? 'light' : ''}">${items.map(it => lfCard(it, l.layout)).join('')}</div>
+      ${items.length < 2 ? '<div class="an-note">Добавь конкурентов — лента собирается из их роликов за полгода.</div>' : ''}</section>
+    <section class="box"><h3>Название</h3><div class="sub">Где YouTube обрежет название и как слова из него работают у конкурентов</div><div id="labTitleBox">${labTitleHtml(v, st)}</div></section>
+    <section class="box"><h3>Под лупой</h3><div class="sub">Превью в реальных размерах и в «плохих условиях»</div>
+      <div id="labLoupe">${img ? '<div class="muted">Считаю…</div>' : '<div class="muted">У видео нет превью — загрузи его кнопкой сверху.</div>'}</div></section>
+    <section class="box"><h3>Выделяемость</h3><div class="sub">Чем твоё превью отличается от превью конкурентов по цвету, яркости и детализации</div>
+      <div id="labStand">${img ? '<div class="muted">Загружаю превью конкурентов…</div>' : '<div class="muted">Нужно превью.</div>'}</div></section>
+    <section class="box"><h3>Слова-магниты в нише</h3>${labWordsHtml(st)}</section>
+  </div>`;
+  if (img) labAnalyze(v, img);
+}
+
+async function labAnalyze(v, img) {
+  const alive = () => location.hash.startsWith('#/lab') && ui.lab.vid === v.id && labImg(v) === img;
+  let bmp;
+  try { bmp = await loadBitmap(img); } catch (e) { if (alive()) $('#labLoupe').innerHTML = `<div class="late">Не удалось прочитать превью: ${esc(e.message)}</div>`; return; }
+  if (!alive()) return;
+  const f = imgFeatures(bmp), sal = saliency(bmp), s = salStats(sal), shot = (w, extra = '', style = '') =>
+    `<div class="shot" style="width:${w}px;${style}"><img src="${esc(img)}" alt="">${extra}</div>`;
+  const zone = `<span class="zone" style="left:${BADGE_ZONE.x * 100}%;top:${BADGE_ZONE.y * 100}%;right:1%;bottom:2%"></span>`;
+  const verdicts = [
+    s.zone > s.zoneArea * 2.5 ? `⚠ В правом нижнем углу много притягивающего — там будет плашка длительности (${Math.round(s.zone * 100)}% внимания на ${Math.round(s.zoneArea * 100)}% площади)`
+      : '✓ Под плашкой длительности ничего важного',
+    s.focus >= 0.4 ? `✓ Внимание собрано в одном-двух местах (${Math.round(s.focus * 100)}% «тепла» в самых ярких 10% кадра)`
+      : s.focus >= 0.28 ? `≈ Внимание немного рассеяно (${Math.round(s.focus * 100)}% «тепла» в самых ярких 10% кадра)`
+      : `⚠ Глазу не за что зацепиться — много равнозначных деталей (${Math.round(s.focus * 100)}% «тепла» в самых ярких 10% кадра)`,
+    f.contrast < 25 ? `⚠ Мало контраста (${Math.round(f.contrast)}): в чёрно-белом всё сливается` : `✓ Контраст ${Math.round(f.contrast)} — в чёрно-белом читается`];
+  $('#labLoupe').innerHTML = `<div class="loupe">
+      <figure>${shot(360)}<figcaption>Главная, 360 px</figcaption></figure>
+      <figure>${shot(168)}<figcaption>Рекомендуемые, 168 px</figcaption></figure>
+      <figure>${shot(100)}<figcaption>Уведомления, 100 px</figcaption></figure>
+    </div>
+    <div class="loupe" style="margin-top:14px">
+      <figure>${shot(246, '', 'filter:blur(3px)')}<figcaption>«Прищур»: главное видно?</figcaption></figure>
+      <figure>${shot(246, '', 'filter:grayscale(1)')}<figcaption>Без цвета</figcaption></figure>
+      <figure>${shot(246, '<canvas width="246" height="138" id="labHeat"></canvas>')}<figcaption>Карта внимания: куда посмотрит глаз</figcaption></figure>
+      <figure>${shot(246, zone)}<figcaption>Зона плашки длительности</figcaption></figure>
+    </div>
+    <div class="verdicts">${verdicts.map(t => `<div>${t}</div>`).join('')}</div>
+    <div class="an-note">Карта внимания — классический алгоритм «спектрального остатка»: он находит то, что выбивается из фона. Это подсказка, а не приговор.</div>`;
+  drawHeat($('#labHeat'), sal);
+
+  // выделяемость: сравниваем с превью свежих роликов конкурентов (по 8 с канала, до 40)
+  const kind = v.type === 'short' ? 'short' : 'video', from = Date.now() - 180 * 864e5, sample = [];
+  for (const c of state.competitors) sample.push(...rivalPool(kind).filter(o => o.c === c && o.t >= from).slice(0, 8));
+  const feats = [];
+  for (let i = 0; i < Math.min(sample.length, 40); i += 6) {
+    const got = await Promise.allSettled(sample.slice(i, Math.min(i + 6, 40)).map(o => loadBitmap(proxied(rivalThumb(o.v.id))).then(imgFeatures)));
+    feats.push(...got.filter(g => g.status === 'fulfilled').map(g => g.value));
+    if (!alive()) return;
+  }
+  if (feats.length < 5) { $('#labStand').innerHTML = `<div class="muted">${sample.length ? 'Не удалось загрузить превью конкурентов — проверь интернет' : 'Добавь конкурентов — сравнивать не с чем'}</div>`; return; }
+  const feedHist = new Float32Array(64);
+  for (const g of feats) g.hist.forEach((w, i) => { feedHist[i] += w / feats.length; });
+  const overlap = f.hist.reduce((s2, w, i) => s2 + Math.min(w, feedHist[i]), 0);
+  const METRICS = [['bright', 'Яркость', 'ярче', 'темнее'], ['contrast', 'Контраст', 'контрастнее', 'мягче'], ['sat', 'Насыщенность', 'сочнее', 'бледнее'], ['detail', 'Детализация', 'больше мелких деталей', 'проще и чище']];
+  let zSum = 0;
+  const rows = METRICS.map(([k, name, up, down]) => {
+    const vals = feats.map(g => g[k]), mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const sd = Math.max(Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length), 1), z = (f[k] - mean) / sd;
+    zSum += Math.abs(z);
+    return `<tr><td>${name}</td><td>${Math.round(f[k])}</td><td>${Math.round(median(vals))}</td><td class="${Math.abs(z) >= 1 ? 'hi' : ''}">${z >= 1 ? up : z <= -1 ? down : 'как у всех'}</td></tr>`;
+  });
+  const score = zSum / METRICS.length + (1 - overlap) * 2;
+  $('#labStand').innerHTML = `<div class="verdicts"><b>${score >= 2 ? '🟢 Выделяется в ленте' : score >= 1.2 ? '🟡 Немного отличается от ленты' : '🔴 Сливается с лентой'}</b>
+      <div class="muted">Цвета совпадают с лентой на ${Math.round(overlap * 100)}%. Выделяться — не значит быть кликабельным, но в ленте похожих превью у непохожего больше шансов, что его заметят.</div></div>
+    <div class="an-table-wrap"><table class="an-table"><thead><tr><th>Признак</th><th>Твоё</th><th>Лента (медиана)</th><th>Итог</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>
+    <div class="loupe" style="margin-top:14px"><figure>${swatches(f.hist)}<figcaption>Твои цвета, %</figcaption></figure>
+      <figure>${swatches(feedHist)}<figcaption>Цвета ленты (${plural(feats.length, ['превью', 'превью', 'превью'])}), %</figcaption></figure></div>`;
+}
+
+/* ----- обработчики инструментов ----- */
+document.addEventListener('click', async e => {
+  const el = e.target.closest('[data-act]');
+  if (!el) return;
+  const d = el.dataset;
+  switch (d.act) {
+    case 'set': {
+      const [a, k] = d.k.split('.'), o = ui[a];
+      o[k] = d.v === '!' ? !o[k] : isNaN(d.v) ? d.v : Number(d.v);
+      if ('show' in o) o.show = 48;
+      if (a === 'game') o.pair = null;
+      rerender();
+      break;
+    }
+    case 'more': ui[d.k].show += 48; rerender(); break;
+    case 'toidea': {
+      if (d.vid) { const c = state.competitors.find(x => x.id === d.cid), rv = c?.videos.find(x => x.id === d.vid); if (!c || !rv) break;
+        const x = xOf(c, rv);
+        addIdea('yt:' + rv.id, kindOf(rv), rv.title, `Вдохновение: «${rv.title}» — ${c.title}${x ? ` (${xText(x)} к медиане канала)` : ''}, ${viewsText(rv.views)}\nhttps://youtu.be/${rv.id}`); }
+      else if (d.rid) { const o = state.radar.results.find(x => x.id === d.rid); if (!o) break;
+        addIdea('yt:' + o.id, o.dur <= 60 ? 'short' : 'video', o.title, `Вдохновение: «${o.title}» — ${o.ch}${o.subs == null ? '' : `, ${subsText(o.subs)}`}, ${viewsText(o.views)}\nhttps://youtu.be/${o.id}`); }
+      else if (d.ask != null) { const it = state.asks.items[Number(d.ask)]; if (!it) break;
+        addIdea(`c:${it.vid}:${it.at}`, 'video', it.text, `Запрос зрителя (👍 ${it.likes}) под «${it.title}»${it.ch ? ' — ' + it.ch : ''}:\n${it.text}\nhttps://youtu.be/${it.vid}`); }
+      el.outerHTML = '<span class="pill idea-on">✓ В идеях</span>';
+      break;
+    }
+    case 'radarrun': runRadar(el); break;
+    case 'radardel': state.radar.queries = state.radar.queries.filter(q => q !== d.q); touch(); rerender(); break;
+    case 'radardays': state.radar.days = Number(d.v); touch(); rerender(); break;
+    case 'radarrival': {
+      busy(el, true, '⏳ Добавляю…');
+      try {
+        const ch = radarChannels[d.cid] || ((await ytGet('channels', {part: 'snippet,statistics,contentDetails,brandingSettings', id: d.cid})).items || [])[0];
+        if (!ch) throw new Error('Канал не найден');
+        await addRival(ch);
+      } catch (err) { toast(err.message, 6000); busy(el, false); }
+      break;
+    }
+    case 'asksload': loadAsks(el); break;
+    case 'gamepick': {
+      const g = ui.game, s = state.game;
+      if (!g?.pair || g.pick != null) break;
+      g.pick = Number(d.i);
+      const win = g.pair[g.pick].v.views >= g.pair[1 - g.pick].v.views;
+      s.played++;
+      if (win) { s.correct++; s.streak++; s.best = Math.max(s.best, s.streak); } else s.streak = 0;
+      touch();
+      rerender();
+      break;
+    }
+    case 'gamenext': ui.game.pair = null; rerender(); break;
+    case 'labshuffle': ui.lab.seed++; rerender(); break;
+    case 'labfind': document.querySelector('.lf-me')?.classList.add('flash'); setTimeout(() => document.querySelector('.lf-me')?.classList.remove('flash'), 1500); break;
+    case 'labimg': {
+      const v = labSubject(), data = await fileToDataUrl(await pickFile('image/*'), ...thumbSize(v));
+      if (data) { ui.lab.imgs[v.id] = data; rerender(); }
+      break;
+    }
+    case 'labapply': {
+      const v = labSubject();
+      v.thumb = ui.lab.imgs[v.id];
+      delete ui.lab.imgs[v.id];
+      touch(v);
+      rerender();
+      toast('✓ Превью видео обновлено');
+      break;
+    }
+    case 'labtitle': { const v = labSubject(); v.title = ui.lab.title; touch(v); rerender(); toast('✓ Название сохранено'); break; }
+  }
+});
+let labTitleTimer;
+document.addEventListener('input', e => {
+  if (e.target.id !== 'labTitle') return;
+  const v = labSubject();
+  ui.lab.title = e.target.value;
+  const me = document.querySelector('.lf-me .lf-title');
+  if (me) me.textContent = e.target.value || 'Без названия';
+  const save = $('[data-act="labtitle"]');
+  if (save) save.hidden = ui.lab.title === v.title;
+  clearTimeout(labTitleTimer);
+  labTitleTimer = setTimeout(() => {
+    const box = $('#labTitleBox');
+    if (box) box.innerHTML = labTitleHtml(v, titleStats(v.type === 'short' ? 'short' : 'video'));
+  }, 400);
+});
+document.addEventListener('change', e => {
+  if (e.target.id === 'labVid') { Object.assign(ui.lab, {vid: e.target.value, title: null}); rerender(); }
+  if (e.target.id === 'radarSort') { ui.radar.sort = e.target.value; rerender(); }
+});
+document.addEventListener('submit', e => {
+  if (e.target.id !== 'radarForm') return;
+  e.preventDefault();
+  const q = e.target.elements.q.value.trim();
+  if (q && !state.radar.queries.includes(q)) { state.radar.queries.push(q); touch(); }
+  rerender();
+  $('#radarForm input')?.focus();
+});
+
 /* ================= действия ================= */
 let menuAnchor = null, lastChannelHash = '#/home', sessionEdits = false;
 
@@ -2731,7 +3500,7 @@ async function videoMenu(anchor, v) {
     copy.title = (v.title || 'Без названия') + ' (копия)';
     copy.createdAt = copy.updatedAt = Date.now();
     copy.stages.forEach(s => s.id = uid());
-    Object.assign(copy, {link: '', yt: null, ytHistory: [], ai: null, ytAnalytics: null});
+    Object.assign(copy, {link: '', yt: null, ytHistory: [], ai: null, ytAnalytics: null, inspo: ''});
     state.videos.unshift(copy);
     touch();
     location.hash = '#/watch/' + copy.id;
