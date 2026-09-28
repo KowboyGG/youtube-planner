@@ -163,8 +163,8 @@ textarea.auto{display:block;width:100%;background:transparent;border:0;outline:n
 .editor-head .ico{font-size:24px}
 .editor-head{flex-wrap:wrap}
 .editor-head #stName{min-width:160px}
-.editor-head input{flex:1;min-width:0;font-size:20px;font-weight:700;background:none;border:0;border-bottom:1px solid var(--line);outline:none;padding:6px 0}
-.editor-head input:focus{border-color:var(--blue)}
+.editor-head > input{flex:1;min-width:0;font-size:20px;font-weight:700;background:none;border:0;border-bottom:1px solid var(--line);outline:none;padding:6px 0}
+.editor-head > input:focus{border-color:var(--blue)}
 .editor textarea{display:block;width:100%;min-height:340px;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:16px;line-height:1.6;font-size:15px;resize:vertical;outline:none}
 .editor textarea:focus{border-color:#555}
 .ed-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;color:var(--text2);flex-wrap:wrap}
@@ -460,7 +460,7 @@ a.pill{color:var(--text)}
   </div>
   <div class="top-right">
     <span class="save-status" id="saveStatus"></span>
-    <button class="pill" id="saveBtn" data-act="save" title="Записать все данные внутрь этого HTML-файла (Ctrl+S)">💾 Сохранить</button>
+    <button class="pill" id="saveBtn" data-act="save" title="Сохранить сейчас в data/planer.json (Ctrl+S). Планер и сам сохраняет через секунду после изменений">💾 Сохранить</button>
     <button class="pill" data-act="create">＋ Создать</button>
     <div class="avatar" id="topAvatar" data-act="settings" style="width:32px;height:32px;font-size:14px;cursor:pointer" title="Настройки канала"></div>
   </div>
@@ -470,8 +470,7 @@ a.pill{color:var(--text)}
 <div class="toast" id="toast"></div>
 <script id="planner-data" type="application/json">null</script>
 <script>
-// Снимок исходного HTML до любых изменений DOM — из него собирается файл при сохранении
-const APP_VERSION = 6; // запускатор сравнивает с версией файла на диске и предлагает обновить страницу
+const APP_VERSION = 7; // запускатор сравнивает с версией файла на диске и предлагает обновить страницу
 
 /* ================= утилиты ================= */
 const $ = (s, r = document) => r.querySelector(s);
@@ -603,7 +602,7 @@ function makeVideo(type, title = '') {
 }
 
 function normalize(s) {
-  const ch = {name: 'Мой канал', handle: '@moy_kanal', description: '', avatar: '', banner: ''};
+  const ch = {name: 'Мой канал', handle: '@moy_kanal', description: '', avatar: '', banner: '', lang: ''};
   s = Object.assign({version: 1, updatedAt: 0, everSaved: false, template: DEFAULT_TEMPLATE.slice(), videos: []}, s || {});
   s.channel = Object.assign(ch, s.channel || {});
   if (!Array.isArray(s.template) || !s.template.length) s.template = DEFAULT_TEMPLATE.slice();
@@ -615,6 +614,7 @@ function normalize(s) {
     stages: (Array.isArray(v.stages) ? v.stages : []).map(st => ({id: st.id || uid(), name: st.name || 'Этап', done: !!st.done, notes: st.notes || '',
       deadline: st.deadline || '', pct: st.done ? 100 : [25, 50, 75].includes(st.pct) ? st.pct : 0, rich: !!st.rich}))
   }));
+  s.ytSkip = Array.isArray(s.ytSkip) ? s.ytSkip : []; // ролики YouTube, удалённые из планера, — синхронизация их больше не предлагает
   s.competitors = (Array.isArray(s.competitors) ? s.competitors : []).filter(c => c && c.id)
     .map(c => ({...c, videos: Array.isArray(c.videos) ? c.videos : [], lastSeenAt: c.lastSeenAt || c.addedAt || Date.now()}));
   return s;
@@ -1253,7 +1253,7 @@ async function ytRefresh(videos) {
     const chunk = pairs.slice(i, i + 50);
     const data = await ytGet('videos', {part: 'snippet,statistics,contentDetails', id: chunk.map(([, id]) => id).join(',')});
     const byId = Object.fromEntries((data.items || []).map(it => [it.id, it]));
-    for (const [v, id] of chunk) if (byId[id]) { applyYt(v, byId[id]); v.updatedAt = Date.now(); n++; }
+    for (const [v, id] of chunk) if (byId[id]) { applyYt(v, byId[id]); n++; }
   }
   return n;
 }
@@ -1314,7 +1314,7 @@ async function syncYouTube(btn) {
       pageToken = pl.nextPageToken || '';
     } while (pageToken && ids.length < 500);
     const kinds = await channelKinds(ch.id, 0, 5000); // точное разделение на видео, Shorts и трансляции
-    const known = new Set(state.videos.map(v => ytIdFrom(v.link)).filter(Boolean));
+    const known = new Set([...state.videos.map(v => ytIdFrom(v.link)).filter(Boolean), ...state.ytSkip]);
     const fresh = ids.filter(id => !known.has(id));
     let added = 0;
     if (fresh.length && confirm(`На канале ${plural(fresh.length, ['видео', 'видео', 'видео'])}, которых нет в планере. Добавить их как опубликованные?${kinds ? '' : '\n\nShorts определяются по длительности до 60 секунд — тип потом можно поменять.'}`)) {
@@ -1346,6 +1346,42 @@ async function syncYouTube(btn) {
     toast(`✓ YouTube: ${added ? `добавлено ${plural(added, ['видео', 'видео', 'видео'])}, ` : ''}статистика обновлена у ${plural(updated + added, ['видео', 'видео', 'видео'])}`, 5000);
   } catch (e) { toast(e.message, 7000); }
   finally { busy(btn, false); }
+}
+
+// Свою статистику подтягиваем сами раз в 6 часов, пока планер открыт, — так копятся замеры для графика роста.
+// Новые ролики сами не добавляем, только подсказываем: добавление остаётся за кнопкой «Синхронизировать с YouTube».
+const OWN_SYNC_EVERY = 6 * 3600e3;
+let ownSyncing = false, freshNotice = '';
+async function autoSyncYouTube() {
+  const c = state.channel, handle = c.handle.trim();
+  if (!secrets.ytKey || !handle || handle === '@moy_kanal' || ownSyncing || Date.now() - (c.yt?.fetchedAt || 0) < OWN_SYNC_EVERY) return;
+  ownSyncing = true;
+  try {
+    const ch = (await ytGet('channels', {part: 'statistics,contentDetails', forHandle: handle.startsWith('@') ? handle : '@' + handle})).items?.[0];
+    if (!ch) return;
+    const st = ch.statistics || {};
+    c.yt = {...c.yt, id: ch.id, subs: +st.subscriberCount || 0, hiddenSubs: !!st.hiddenSubscriberCount, views: +st.viewCount || 0,
+      videos: +st.videoCount || 0, fetchedAt: Date.now()};
+    await ytRefresh(state.videos);
+    const uploads = ch.contentDetails?.relatedPlaylists?.uploads;
+    const known = new Set([...state.videos.map(v => ytIdFrom(v.link)).filter(Boolean), ...state.ytSkip]);
+    const fresh = ((uploads && await playlistIds(uploads, 0, 50)) || []).filter(id => !known.has(id));
+    touch();
+    quietRerender();
+    if (fresh.length && fresh.join() !== freshNotice) {
+      freshNotice = fresh.join();
+      toast(`На YouTube ${plural(fresh.length, ['новый ролик', 'новых ролика', 'новых роликов'])} — нажми «Синхронизировать с YouTube», чтобы добавить`, 8000);
+    }
+  } catch (e) { console.warn('Автосинхронизация с YouTube:', e.message); }
+  finally { ownSyncing = false; }
+}
+
+// Перерисовать после фонового обновления, только если это не собьёт человека посреди ввода или ответа ИИ
+function quietRerender() {
+  const a = document.activeElement;
+  if (getVideo() || aiBusy || a?.isContentEditable || (app.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))
+    || $('#aiPaste:not([hidden])')) return;
+  rerender();
 }
 
 // Пробуем адреса по очереди: напрямую, а при запуске через запускатор — ещё и через него
@@ -1467,6 +1503,12 @@ function renderCalendar(body) {
 const AI_SYSTEM = 'Ты — опытный YouTube-продюсер и аналитик роста каналов. Пиши по-русски, простым языком, конкретно и по делу. ' +
   'Опирайся на цифры и материалы автора и не выдумывай данных, которых нет; если данных мало — прямо скажи, чего не хватает. ' +
   'Оформляй ответ заголовками (##) и короткими списками, главное выделяй **жирным**. Без вступлений и прощаний.';
+// Разбор и советы — по-русски, а то, что пойдёт в сам ролик (названия, описания, теги, реплики), — на языке канала
+const aiSystem = () => {
+  const lang = (state.channel.lang || '').trim();
+  return !lang || /^(ru|рус)/i.test(lang) ? AI_SYSTEM : AI_SYSTEM + ` Канал ведётся на языке: ${lang}. ` +
+    'Варианты названий, описания, теги, хуки, реплики сценария и текст на превью пиши на этом языке, а разбор и советы — по-русски.';
+};
 const TASK_PUBLISHED = 'Задача: разбери, как видео показало себя. Разделы: ## Итог (2–3 предложения с цифрами и сравнением с другими видео канала) ' +
   '## Что сработало ## Что мешает (название, превью, тема, длительность, подача) ## Что говорят зрители (если есть комментарии) ' +
   '## Что сделать (3–5 конкретных действий для этого и следующих видео) ## Варианты названия (3 штуки, если текущее можно улучшить)';
@@ -1700,7 +1742,7 @@ async function runAi(kind, v, btn) {
     const comments = kind === 'video' && v.yt && $('#aiComments')?.checked ? await ytTopComments(v.yt.id) : [];
     const text = kind === 'video' ? videoPrompt(v, comments, question) : channelPrompt(question);
     const call = {gemini: callGemini, openai: callOpenAI}[secrets.provider] || callClaude;
-    const res = await call({system: AI_SYSTEM, text, images: kind === 'video' ? await thumbImages(v) : []}, t => { out.innerHTML = mdToHtml(t); });
+    const res = await call({system: aiSystem(), text, images: kind === 'video' ? await thumbImages(v) : []}, t => { out.innerHTML = mdToHtml(t); });
     if (!res.text.trim()) throw new Error('ИИ вернул пустой ответ — попробуй ещё раз');
     const rec = {text: res.text, at: Date.now(), model: res.model, question};
     if (kind === 'video') { v.ai = rec; touch(v); } else { state.ai = rec; touch(); }
@@ -2214,7 +2256,7 @@ async function copyImage(src) {
 async function copyForChat(btn, build, hint = '') {
   busy(btn, true, '⏳ Собираю…');
   try {
-    await copyText(AI_SYSTEM + '\n\n' + await build());
+    await copyText(aiSystem() + '\n\n' + await build());
     toast('📋 Скопировано — вставь в Claude или ChatGPT' + hint, 6000);
   } catch (e) { toast('Не получилось скопировать: ' + e.message, 6000); }
   finally { busy(btn, false); }
@@ -2689,7 +2731,7 @@ async function videoMenu(anchor, v) {
     copy.title = (v.title || 'Без названия') + ' (копия)';
     copy.createdAt = copy.updatedAt = Date.now();
     copy.stages.forEach(s => s.id = uid());
-    Object.assign(copy, {link: '', yt: null, ytHistory: [], ai: null});
+    Object.assign(copy, {link: '', yt: null, ytHistory: [], ai: null, ytAnalytics: null});
     state.videos.unshift(copy);
     touch();
     location.hash = '#/watch/' + copy.id;
@@ -2700,10 +2742,12 @@ async function videoMenu(anchor, v) {
     v.stages.forEach(s => { s.done = false; s.pct = 0; }); touch(v); rerender();
   }
   if (a === 'del' && confirm(`Удалить «${v.title || 'Без названия'}» со всеми заметками?`)) {
+    const ytId = v.yt?.id || ytIdFrom(v.link);
+    if (ytId && !state.ytSkip.includes(ytId)) state.ytSkip.push(ytId);
     state.videos = state.videos.filter(x => x !== v);
     touch();
     if (onWatch) location.hash = lastChannelHash; else rerender();
-    toast('Видео удалено');
+    toast(ytId ? 'Видео удалено — синхронизация с YouTube больше не предложит его добавить' : 'Видео удалено', ytId ? 5000 : 3200);
   }
 }
 
@@ -2770,6 +2814,9 @@ function openSettings(toConnections) {
     <h2>Настройки канала</h2>
     <label>Название канала</label><input type="text" name="name" value="${esc(c.name)}" maxlength="60">
     <label>Имя пользователя</label><input type="text" name="handle" value="${esc(c.handle)}" maxlength="40">
+    <label>Язык роликов — на нём ИИ предложит названия, описания и теги (советы всё равно будут по-русски)</label>
+    <input type="text" name="lang" value="${esc(c.lang)}" maxlength="30" list="chLangs" placeholder="Русский">
+    <datalist id="chLangs">${['Русский', 'English', 'Українська', 'Español', 'Português', 'Deutsch'].map(l => `<option value="${l}">`).join('')}</datalist>
     <label>Описание</label><textarea name="description">${esc(c.description)}</textarea>
     <label>Этапы для новых видео — каждый с новой строки</label><textarea name="template">${esc(state.template.join('\n'))}</textarea>
     <label>Оформление</label>
@@ -2840,6 +2887,7 @@ function openSettings(toConnections) {
     c.name = f.get('name').trim() || 'Мой канал';
     c.handle = h ? (h.startsWith('@') ? h : '@' + h) : '';
     c.description = f.get('description').trim();
+    c.lang = f.get('lang').trim();
     const tpl = f.get('template').split('\n').map(s => s.trim()).filter(Boolean);
     if (tpl.length) state.template = tpl;
     tmp.keys[prov] = form.aiKey.value.trim();
@@ -3289,9 +3337,10 @@ async function init() {
   route();
   if (dirty && canAutoFile) saveToFile(false);
   refreshRivals(false);
+  autoSyncYouTube();
 }
 init();
-setInterval(() => { if (state) refreshRivals(false); }, 30 * 60e3); // новые видео конкурентов, пока планер открыт
+setInterval(() => { if (state) { refreshRivals(false); autoSyncYouTube(); } }, 30 * 60e3); // новые видео и свежие цифры, пока планер открыт
 </script>
 </body>
 </html>

@@ -10,6 +10,11 @@ const crypto = require('crypto');
 const {Readable} = require('stream');
 const {exec} = require('child_process');
 
+if (typeof fetch !== 'function') { // запросы к YouTube, ИИ и картинкам идут через fetch — он есть только с Node.js 18
+  console.error(`Нужен Node.js 18 или новее, а установлен ${process.version}. Скачай свежий с https://nodejs.org и запусти планер снова.`);
+  process.exit(1);
+}
+
 const args = process.argv.slice(2);
 const argVal = (name, def) => { const i = args.indexOf(name); return i >= 0 && args[i + 1] ? args[i + 1] : def; };
 const PORT = Number(argVal('--port', process.env.PLANER_PORT || 5178));
