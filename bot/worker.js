@@ -125,7 +125,8 @@ async function onTelegram(env, upd) {
       await env.PLANER.put('chat', chat);
       return send(env, chat, `✅ Бот подключён к планеру. Отчёт буду присылать каждый день в ${snap.reportHour ?? 9}:00.\n\n${HELP}`);
     }
-    if (bound !== chat) return send(env, chat, 'Это личный бот. Подключить его можно только из настроек планера.');
+    if (bound !== chat) return send(env, chat, arg ? 'Код не подходит. Возьми свежий в планере: «Настроить канал» → «Telegram-бот» → «Подключить».'
+      : 'Это личный бот. Чтобы подключить его к планеру, отправь сюда <code>/start КОД</code> — код показан в планере: «Настроить канал» → «Telegram-бот» → «Подключить».');
   }
   if (bound !== chat) return; // чужим не отвечаем
   if (cmd === '/report') return send(env, chat, await buildReport(env, false));
@@ -149,7 +150,9 @@ async function onTelegram(env, upd) {
 export async function botRoute(req, env, ctx, url, authed) {
   if (url.pathname === '/telegram' && req.method === 'POST') {
     if (req.headers.get('x-telegram-bot-api-secret-token') !== await hookSecret(env)) return new Response('forbidden', {status: 403});
-    ctx.waitUntil(req.json().then(upd => onTelegram(env, upd)).catch(e => console.log('telegram', e)));
+    // тело читаем до ответа: после ответа Cloudflare его уже не отдаёт
+    const upd = await req.json().catch(() => null);
+    if (upd) ctx.waitUntil(onTelegram(env, upd).catch(e => console.log('telegram', e)));
     return new Response('ok');
   }
   const route = `${req.method} ${url.pathname}`;

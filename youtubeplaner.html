@@ -551,7 +551,7 @@ a.pill{color:var(--text)}
 <div class="toast" id="toast"></div>
 <script id="planner-data" type="application/json">null</script>
 <script>
-const APP_VERSION = 11; // запускатор сравнивает с версией файла на диске и предлагает обновить страницу
+const APP_VERSION = 12; // запускатор сравнивает с версией файла на диске и предлагает обновить страницу
 
 /* ================= утилиты ================= */
 const $ = (s, r = document) => r.querySelector(s);
@@ -3816,7 +3816,8 @@ function openSettings(toConnections) {
           await tgPush(true);
           const link = `https://t.me/${info.bot}?start=${secrets.tgCode}`;
           status.innerHTML = `✓ Бот <b>@${esc(info.bot)}</b> на связи.${info.ytKey ? '' : ' <span class="late">В воркере нет секрета YT_KEY — без него в отчёте не будет свежих цифр.</span>'}<br>` +
-            (info.linked ? 'Чат уже подключён. ' : '') + `<a href="${link}" target="_blank" rel="noopener">Открой эту ссылку и нажми «Start»</a> — так бот узнает, куда писать.`;
+            (info.linked ? 'Чат уже подключён. ' : '') + `<a href="${link}" target="_blank" rel="noopener">Открой эту ссылку и нажми «Start»</a> — так бот узнает, куда писать.<br>` +
+            `Если бот не ответил «✅ Бот подключён», отправь ему вручную: <code>/start ${esc(secrets.tgCode)}</code>`;
         }
       } catch (err) { toast('Telegram-бот: ' + err.message, 8000); }
       finally { busy(btn, false); }
