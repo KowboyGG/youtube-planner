@@ -12,16 +12,21 @@
 ### 1. Создай бота в Телеграме
 Напиши [@BotFather](https://t.me/BotFather) → `/newbot` → придумай имя → он пришлёт **токен** вида `123456:ABC…`.
 
-### 2. Создай воркер в Cloudflare
-1. [dash.cloudflare.com](https://dash.cloudflare.com) → **Workers & Pages** → **Create** → **Create Worker**.
-   Имя, например, `planer-bot` → **Deploy**.
-2. **Edit code** → удали всё, что там есть, вставь содержимое файла `bot/worker.js` → **Deploy**.
+### 2. Воркер в Cloudflare
+Проще всего привязать воркер к этому репозиторию: **Workers & Pages** → **Create** → **Import a repository** →
+`KowboyGG/youtube-planner`. Остальное Cloudflare возьмёт из `wrangler.jsonc` в корне репозитория: код бота,
+хранилище KV (создастся само), расписание раз в час и адрес `*.workers.dev`. Новая версия бота выкатывается
+сама после каждого изменения в ветке `main`.
 
-### 3. Хранилище
-1. **Storage & Databases** → **KV** → **Create** → имя `planer`.
-2. В воркере: **Settings** → **Bindings** → **Add** → **KV namespace**. Имя переменной **`PLANER`**, хранилище `planer`.
+<details><summary>Без привязки к GitHub (вручную)</summary>
 
-### 4. Секреты
+1. **Create** → **Create Worker** → **Deploy** → **Edit code** → вставь содержимое `bot/worker.js` → **Deploy**.
+2. **Storage & Databases** → **KV** → **Create** → `planer`; в воркере **Settings** → **Bindings** → **KV namespace**,
+   имя переменной **`PLANER`**.
+3. **Settings** → **Triggers** → **Cron Triggers** → `0 * * * *`.
+</details>
+
+### 3. Секреты
 В воркере: **Settings** → **Variables and Secrets** → **Add**, тип **Secret**:
 
 | Имя | Что вставить |
@@ -30,11 +35,7 @@
 | `YT_KEY` | тот же ключ YouTube Data API, что в планере («Настроить канал» → «Подключения») |
 | `PLANER_SECRET` | любой длинный пароль, например 30 случайных букв и цифр |
 
-### 5. Расписание
-В воркере: **Settings** → **Triggers** → **Cron Triggers** → **Add** → `0 * * * *` (каждый час).
-Бот сам решает по твоему часовому поясу, когда пора отправлять отчёт.
-
-### 6. Подключи планер
+### 4. Подключи планер
 Планер → «Настроить канал» → раздел **Telegram-бот**:
 - адрес воркера (виден на странице воркера, вида `https://planer-bot.имя.workers.dev`);
 - секрет — тот же `PLANER_SECRET`;

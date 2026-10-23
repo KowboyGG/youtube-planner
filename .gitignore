@@ -2,3 +2,7 @@
 data/
 backups/
 *.tmp
+
+# служебное Cloudflare Wrangler
+node_modules/
+.wrangler/
