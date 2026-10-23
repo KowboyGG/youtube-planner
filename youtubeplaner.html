@@ -551,7 +551,7 @@ a.pill{color:var(--text)}
 <div class="toast" id="toast"></div>
 <script id="planner-data" type="application/json">null</script>
 <script>
-const APP_VERSION = 9; // запускатор сравнивает с версией файла на диске и предлагает обновить страницу
+const APP_VERSION = 10; // запускатор сравнивает с версией файла на диске и предлагает обновить страницу
 
 /* ================= утилиты ================= */
 const $ = (s, r = document) => r.querySelector(s);
@@ -767,6 +767,7 @@ function touch(video) {
     clearTimeout(fileTimer);
     fileTimer = setTimeout(() => saveToFile(false), 1200);
   }
+  if (tgOn()) { clearTimeout(tgTimer); tgTimer = setTimeout(() => tgPush(false), 60e3); }
   updateStatus();
 }
 
@@ -3476,6 +3477,58 @@ document.addEventListener('submit', e => {
   $('#radarForm input')?.focus();
 });
 
+/* ================= Telegram-бот (Cloudflare Worker из папки bot) ================= */
+// В воркер уходит только сводка для отчёта: дедлайны, часы, id роликов и «выстрелившее» у конкурентов — без ключей и сценариев
+const tgOn = () => !!(secrets.tgUrl && secrets.tgSecret);
+async function tgCall(path, body, url = secrets.tgUrl, secret = secrets.tgSecret) {
+  let r;
+  try {
+    r = await fetch(url.trim().replace(/\/+$/, '') + path, {method: body ? 'POST' : 'GET', signal: AbortSignal.timeout(20e3),
+      headers: {authorization: 'Bearer ' + secret, 'content-type': 'application/json'}, body: body && JSON.stringify(body)});
+  } catch (e) { throw new Error('нет связи с ботом — проверь адрес воркера'); }
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || 'бот ответил ' + r.status);
+  return d;
+}
+function tgSnapshot() {
+  const c = state.channel, deadlines = [];
+  for (const v of state.videos) {
+    if (v.yt) continue;
+    const title = v.title || 'Без названия';
+    if (v.deadline && progress(v) < 100) deadlines.push({title, date: v.deadline, pct: progress(v), left: v.stages.filter(s => !s.done).length});
+    for (const s of v.stages) if (s.deadline && !s.done) deadlines.push({title, date: s.deadline, stage: s.name});
+  }
+  return {channelId: c.yt?.id || '', channelName: c.name, subs: c.yt?.subs, tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    reportHour: secrets.tgHour ?? 9, linkCode: secrets.tgCode, deadlines,
+    ypp: state.ypp ? {hours: Math.round(state.ypp.hours), at: state.ypp.fetchedAt} : null,
+    videos: published(null).slice(0, 50).map(v => ({id: v.yt.id, title: v.title || v.yt.title})),
+    hot: hotList(7, 2, 'all').slice(0, 5).map(o => ({id: o.v.id, title: o.v.title, ch: o.c.title, x: Math.round(o.x * 10) / 10}))};
+}
+let tgLast = '', tgTimer;
+async function tgPush(force) {
+  if (!tgOn() || !state) return;
+  const snap = JSON.stringify(tgSnapshot());
+  if (!force && snap === tgLast) return; // без изменений не пишем — у бесплатного хранилища лимит записей
+  try { await tgCall('/snapshot', JSON.parse(snap)); tgLast = snap; }
+  catch (e) { if (force) throw e; console.warn('Telegram-бот:', e.message); }
+}
+async function tgPullIdeas() {
+  if (!tgOn() || !state) return;
+  try {
+    const {items = []} = await tgCall('/inbox');
+    if (!items.length) return;
+    for (const it of items) if (!hasIdea('tg:' + it.id)) {
+      const v = makeVideo('video', it.text.replace(/\s+/g, ' ').trim().slice(0, 100));
+      Object.assign(v, {notes: `Идея из Телеграма, ${new Date(it.at).toLocaleString('ru-RU')}:\n${it.text}`, inspo: 'tg:' + it.id});
+      state.videos.unshift(v);
+    }
+    touch();
+    await tgCall('/inbox/ack', {ids: items.map(i => i.id)});
+    quietRerender();
+    toast(`📨 Из Телеграма: ${plural(items.length, ['идея', 'идеи', 'идей'])} — на главной в «Не начатых»`, 5000);
+  } catch (e) { console.warn('Telegram-бот:', e.message); }
+}
+
 /* ================= действия ================= */
 let menuAnchor = null, lastChannelHash = '#/home', sessionEdits = false;
 
@@ -3653,6 +3706,15 @@ function openSettings(toConnections) {
       <li><b>Gemini</b>: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.</li>
       <li><b>ChatGPT</b>: <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys</a>. Работает только при запуске через «Запустить планер.bat». Недорогая модель — <code>gpt-5.6-luna</code>, самая сильная — <code>gpt-6-astra</code>; точный список для твоего ключа покажет кнопка «Список моделей».</li>
     </ol>Каждый анализ — это один платный запрос к выбранному сервису (если у него нет бесплатного лимита).</details>
+    <h3>Telegram-бот</h3>
+    <div class="muted">Утренний отчёт (подписчики, просмотры, комментарии, дедлайны, монетизация) и идеи с телефона.
+      Бот живёт в бесплатном Cloudflare Worker — как его создать, написано в <code>bot/README.md</code>.</div>
+    <label>Адрес воркера</label><input type="text" name="tgUrl" value="${esc(secrets.tgUrl || '')}" placeholder="https://planer-bot.имя.workers.dev" autocomplete="off">
+    <label>Секрет — то же значение, что PLANER_SECRET в настройках воркера</label><input type="password" name="tgSecret" value="${esc(secrets.tgSecret || '')}" autocomplete="off">
+    <label>Во сколько присылать отчёт</label>
+    <select name="tgHour">${Array.from({length: 24}, (_, h) => `<option value="${h}" ${(secrets.tgHour ?? 9) === h ? 'selected' : ''}>${h}:00</option>`).join('')}</select>
+    <div class="dlg-row" style="margin-top:10px"><button type="button" class="pill" data-d="tgsetup">🔗 Подключить</button><button type="button" class="pill" data-d="tgtest">📨 Прислать отчёт сейчас</button></div>
+    <div class="howto" id="tgStatus"></div>
     <div class="dialog-actions"><button type="button" class="pill" data-d="close">Отмена</button><button type="submit" class="pill white">Готово</button></div>
   </form>`;
   document.body.appendChild(ov);
@@ -3681,9 +3743,12 @@ function openSettings(toConnections) {
     if (tpl.length) state.template = tpl;
     tmp.keys[prov] = form.aiKey.value.trim();
     tmp.models[prov] = form.aiModel.value.trim();
-    secrets = {ytKey: form.ytKey.value.trim(), oauthClientId: form.oauthClientId.value.trim(), provider: prov, keys: tmp.keys, models: tmp.models};
+    secrets = {...secrets, ytKey: form.ytKey.value.trim(), oauthClientId: form.oauthClientId.value.trim(), provider: prov, keys: tmp.keys, models: tmp.models,
+      tgUrl: form.tgUrl.value.trim(), tgSecret: form.tgSecret.value.trim(), tgHour: Number(form.tgHour.value)};
+    secrets.tgCode ||= uid() + uid();
     idbSet(SECRETS_KEY, secrets);
     touch();
+    tgPush(true).catch(err => toast('Telegram-бот: ' + err.message, 7000));
     close();
     rerender();
     renderTopAvatar();
@@ -3703,6 +3768,27 @@ function openSettings(toConnections) {
         await ytGet('videos', {part: 'id', id: 'dQw4w9WgXcQ'}, key);
         toast('✓ Ключ YouTube работает — нажми «Готово», чтобы сохранить', 6000);
       } catch (err) { toast(err.message + looksWrong, 15000); }
+      finally { busy(btn, false); }
+    }
+    if (d === 'tgsetup' || d === 'tgtest') {
+      const btn = e.target.closest('[data-d]'), status = form.querySelector('#tgStatus');
+      const url = form.tgUrl.value.trim(), secret = form.tgSecret.value.trim();
+      if (!url || !secret) return toast('Впиши адрес воркера и секрет');
+      busy(btn, true, '⏳ Связываюсь…');
+      try {
+        // настройки бота применяем сразу, чтобы сводка ушла с правильным часом и кодом подключения
+        secrets = {...secrets, tgUrl: url, tgSecret: secret, tgHour: Number(form.tgHour.value)};
+        secrets.tgCode ||= uid() + uid();
+        idbSet(SECRETS_KEY, secrets);
+        if (d === 'tgtest') { await tgPush(true); await tgCall('/test', {}); toast('📨 Отчёт отправлен — загляни в Телеграм'); }
+        else {
+          const info = await tgCall('/setup', {});
+          await tgPush(true);
+          const link = `https://t.me/${info.bot}?start=${secrets.tgCode}`;
+          status.innerHTML = `✓ Бот <b>@${esc(info.bot)}</b> на связи.${info.ytKey ? '' : ' <span class="late">В воркере нет секрета YT_KEY — без него в отчёте не будет свежих цифр.</span>'}<br>` +
+            (info.linked ? 'Чат уже подключён. ' : '') + `<a href="${link}" target="_blank" rel="noopener">Открой эту ссылку и нажми «Start»</a> — так бот узнает, куда писать.`;
+        }
+      } catch (err) { toast('Telegram-бот: ' + err.message, 8000); }
       finally { busy(btn, false); }
     }
     if (d === 'models') {
@@ -4127,8 +4213,11 @@ async function init() {
   if (dirty && canAutoFile) saveToFile(false);
   refreshRivals(false);
   autoSyncYouTube();
+  tgPush(false);
+  tgPullIdeas();
 }
 init();
+setInterval(() => { if (state) tgPullIdeas(); }, 2 * 60e3); // идеи, присланные боту
 setInterval(() => { if (state) { refreshRivals(false); autoSyncYouTube(); } }, 30 * 60e3); // новые видео и свежие цифры, пока планер открыт
 </script>
 </body>
