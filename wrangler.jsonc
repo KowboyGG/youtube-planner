@@ -1,13 +1,18 @@
-// Настройки воркера Cloudflare для Telegram-бота (bot/worker.js). Cloudflare берёт их отсюда при каждой сборке из GitHub.
+// Облачный планер и Telegram-бот на Cloudflare Workers. Cloudflare берёт эти настройки при каждой сборке из GitHub.
 // Секреты BOT_TOKEN, YT_KEY и PLANER_SECRET сюда НЕ пишутся — они задаются в панели Cloudflare и сохраняются между сборками.
+// PLANER_SECRET — это и пароль для входа в облачный планер.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "youtube-planner",
-  "main": "bot/worker.js",
+  "main": "cloud/worker.js",
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
-  // хранилище для сводки из планера, идей и состояния отчётов; без id Cloudflare создаст его сам при первом деплое
+  // youtubeplaner.html встраивается в воркер как текст
+  "rules": [{"type": "Text", "globs": ["**/*.html"], "fallthrough": true}],
+  // KV — сводка для бота и его состояние; D1 — данные планера, картинки и резервные копии.
+  // Без id Cloudflare создаёт их сам при первом деплое и дальше использует те же.
   "kv_namespaces": [{"binding": "PLANER"}],
+  "d1_databases": [{"binding": "DB", "database_name": "planer"}],
   // каждый час бот проверяет, не пора ли слать утренний отчёт по твоему часовому поясу
   "triggers": {"crons": ["0 * * * *"]}
 }
