@@ -1,0 +1,2 @@
+# bat-файлы Windows запускает надёжнее с CRLF
+*.bat text eol=crlf

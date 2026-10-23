@@ -1,0 +1,8 @@
+# личные данные планера и резервные копии — живут только на компьютере
+data/
+backups/
+*.tmp
+
+# служебное Cloudflare Wrangler
+node_modules/
+.wrangler/
