@@ -551,7 +551,7 @@ a.pill{color:var(--text)}
 <div class="toast" id="toast"></div>
 <script id="planner-data" type="application/json">null</script>
 <script>
-const APP_VERSION = 11; // запускатор сравнивает с версией файла на диске и предлагает обновить страницу
+const APP_VERSION = 13; // запускатор сравнивает с версией файла на диске и предлагает обновить страницу
 
 /* ================= утилиты ================= */
 const $ = (s, r = document) => r.querySelector(s);
@@ -1474,6 +1474,43 @@ function quietRerender() {
 }
 
 // Пробуем адреса по очереди: напрямую, а при запуске через запускатор — ещё и через него
+// Картинки, ссылки на которые есть, а самих файлов нет (например, копию перенесли из старой версии без картинок), —
+// заново забираем с YouTube: превью — по id видео, лого и баннер — по каналу. Чего не найти, то убираем.
+async function repairImages() {
+  const missing = async src => typeof src === 'string' && src.startsWith('data/images/') && !(await fetch(src).then(r => r.ok, () => true));
+  const c = state.channel;
+  let fixed = 0, dropped = 0;
+  for (const v of state.videos) {
+    if (!await missing(v.thumb)) continue;
+    const id = v.yt?.id || ytIdFrom(v.link);
+    const img = id && await imageFromYoutube(['maxresdefault', 'sddefault', 'hqdefault'].map(n => `https://i.ytimg.com/vi/${id}/${n}.jpg`), ...thumbSize(v));
+    v.thumb = img || '';
+    img ? fixed++ : dropped++;
+  }
+  const lostAva = await missing(c.avatar), lostBanner = await missing(c.banner);
+  if (lostAva || lostBanner) {
+    let ch = null;
+    if (secrets.ytKey && c.yt?.id) try { ch = (await ytGet('channels', {part: 'snippet,brandingSettings', id: c.yt.id})).items?.[0]; } catch (e) {}
+    const ava = ch?.snippet?.thumbnails?.high?.url || ch?.snippet?.thumbnails?.default?.url, banner = ch?.brandingSettings?.image?.bannerExternalUrl;
+    if (lostAva) {
+      const img = ava && await imageFromYoutube([ava.replace(/=s\d+/, '=s400'), ava], 400, 400);
+      Object.assign(c, {avatar: img || '', avatarSrc: img ? ava : '', avatarCustom: false});
+      img ? fixed++ : dropped++;
+    }
+    if (lostBanner) {
+      const img = banner && await imageFromYoutube([banner + '=w2560-fcrop64=1,00005a57ffffa5a8-k-c0xffffffff-no-nd-rj', banner + '=w2560', banner], 2560, 1440);
+      Object.assign(c, {banner: img || '', bannerSrc: img ? banner : '', bannerCustom: false});
+      img ? fixed++ : dropped++;
+    }
+  }
+  if (!fixed && !dropped) return;
+  touch();
+  quietRerender();
+  renderTopAvatar();
+  toast(fixed ? `🖼 Восстановил с YouTube ${plural(fixed, ['картинку', 'картинки', 'картинок'])}${dropped ? `, ещё ${dropped} найти не удалось` : ''}`
+    : `🖼 ${plural(dropped, ['картинка не нашлась', 'картинки не нашлись', 'картинок не нашлось'])} — загрузи их заново`, 6000);
+}
+
 async function imageFromYoutube(urls, w, h) {
   for (const url of urls) {
     for (const src of [url, ...(serverMode ? ['/api/image?url=' + encodeURIComponent(url)] : [])]) {
@@ -3816,7 +3853,8 @@ function openSettings(toConnections) {
           await tgPush(true);
           const link = `https://t.me/${info.bot}?start=${secrets.tgCode}`;
           status.innerHTML = `✓ Бот <b>@${esc(info.bot)}</b> на связи.${info.ytKey ? '' : ' <span class="late">В воркере нет секрета YT_KEY — без него в отчёте не будет свежих цифр.</span>'}<br>` +
-            (info.linked ? 'Чат уже подключён. ' : '') + `<a href="${link}" target="_blank" rel="noopener">Открой эту ссылку и нажми «Start»</a> — так бот узнает, куда писать.`;
+            (info.linked ? 'Чат уже подключён. ' : '') + `<a href="${link}" target="_blank" rel="noopener">Открой эту ссылку и нажми «Start»</a> — так бот узнает, куда писать.<br>` +
+            `Если бот не ответил «✅ Бот подключён», отправь ему вручную: <code>/start ${esc(secrets.tgCode)}</code>`;
         }
       } catch (err) { toast('Telegram-бот: ' + err.message, 8000); }
       finally { busy(btn, false); }
@@ -4250,6 +4288,7 @@ async function init() {
   autoSyncYouTube();
   tgPush(false);
   tgPullIdeas();
+  repairImages();
 }
 init();
 setInterval(() => { if (state) tgPullIdeas(); }, 2 * 60e3); // идеи, присланные боту
