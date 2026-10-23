@@ -1,10 +1,7 @@
-// Telegram-бот YouTube-планера. Работает на Cloudflare Workers (бесплатный тариф).
+// Telegram-бот YouTube-планера — часть облачного воркера (cloud/worker.js).
 // Планер присылает сюда короткую сводку (дедлайны, часы для монетизации, id роликов, «выстрелившее» у конкурентов),
 // а бот каждое утро добавляет к ней свежие цифры с YouTube и шлёт отчёт. Идеи, присланные боту, ждут здесь,
 // пока планер их не заберёт. Как всё подключить — bot/README.md.
-//
-// Нужно в настройках воркера: KV-хранилище с именем переменной PLANER, секреты BOT_TOKEN, PLANER_SECRET, YT_KEY
-// и триггер по расписанию «0 * * * *» (каждый час; бот сам решает, пора ли слать отчёт по твоему часовому поясу).
 
 const CORS = {'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, content-type', 'access-control-allow-methods': 'GET, POST, OPTIONS'};
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), {status, headers: {'content-type': 'application/json; charset=utf-8', ...CORS}});
@@ -148,53 +145,51 @@ async function onTelegram(env, upd) {
   return send(env, chat, '💡 Записал идею — появится в планере, когда ты его откроешь.');
 }
 
-export default {
-  async fetch(req, env, ctx) {
-    const url = new URL(req.url);
-    if (req.method === 'OPTIONS') return new Response(null, {headers: CORS});
-    if (!env.PLANER || !env.PLANER_SECRET || !env.BOT_TOKEN)
-      return json({error: 'Воркер не настроен: нужны KV-хранилище PLANER и секреты PLANER_SECRET и BOT_TOKEN'}, 500);
-    if (url.pathname === '/telegram' && req.method === 'POST') {
-      if (req.headers.get('x-telegram-bot-api-secret-token') !== await hookSecret(env)) return new Response('forbidden', {status: 403});
-      ctx.waitUntil(req.json().then(upd => onTelegram(env, upd)).catch(e => console.log('telegram', e)));
-      return new Response('ok');
-    }
-    if (req.headers.get('authorization') !== 'Bearer ' + env.PLANER_SECRET) return json({error: 'Секрет не подходит — сверь его с PLANER_SECRET воркера'}, 401);
-    switch (`${req.method} ${url.pathname}`) {
-      case 'POST /setup': { // планер вызывает при подключении: проверяем бота и направляем Телеграм сюда
-        const me = await tg(env, 'getMe', {});
-        if (!me.ok) return json({error: 'Телеграм не принял BOT_TOKEN — скопируй токен у @BotFather заново'}, 400);
-        const hook = await tg(env, 'setWebhook', {url: url.origin + '/telegram', secret_token: await hookSecret(env), allowed_updates: ['message']});
-        if (!hook.ok) return json({error: 'Телеграм: ' + hook.description}, 400);
-        await tg(env, 'setMyCommands', {commands: COMMANDS});
-        return json({bot: me.result.username, linked: !!await env.PLANER.get('chat'), ytKey: !!env.YT_KEY});
-      }
-      case 'POST /snapshot':
-        await kvPut(env, 'snapshot', await req.json());
-        return json({ok: true, linked: !!await env.PLANER.get('chat')});
-      case 'POST /test': {
-        const chat = await env.PLANER.get('chat');
-        if (!chat) return json({error: 'Сначала открой ссылку подключения и нажми «Start» в Телеграме'}, 400);
-        await send(env, chat, await buildReport(env, false));
-        return json({ok: true});
-      }
-      case 'GET /inbox': return json({items: (await kvGet(env, 'inbox')) || []});
-      case 'POST /inbox/ack': {
-        const {ids = []} = await req.json();
-        await kvPut(env, 'inbox', ((await kvGet(env, 'inbox')) || []).filter(i => !ids.includes(i.id)));
-        return json({ok: true});
-      }
-    }
-    return json({error: 'Не найдено'}, 404);
-  },
-
-  // Каждый час: если по часовому поясу планера наступил час отчёта и сегодня его ещё не было — отправляем
-  async scheduled(event, env, ctx) {
-    const snap = await kvGet(env, 'snapshot'), chat = await env.PLANER.get('chat');
-    if (!snap || !chat) return;
-    const {date, hour} = localNow(snap.tz);
-    if (hour < (snap.reportHour ?? 9) || await env.PLANER.get('lastReport') === date) return;
-    await env.PLANER.put('lastReport', date);
-    await send(env, chat, await buildReport(env, true));
+// Запросы бота. authed — запрос пришёл из планера (вход по паролю или Bearer PLANER_SECRET). Не наш путь — null.
+export async function botRoute(req, env, ctx, url, authed) {
+  if (url.pathname === '/telegram' && req.method === 'POST') {
+    if (req.headers.get('x-telegram-bot-api-secret-token') !== await hookSecret(env)) return new Response('forbidden', {status: 403});
+    ctx.waitUntil(req.json().then(upd => onTelegram(env, upd)).catch(e => console.log('telegram', e)));
+    return new Response('ok');
   }
-};
+  const route = `${req.method} ${url.pathname}`;
+  if (!['POST /setup', 'POST /snapshot', 'POST /test', 'GET /inbox', 'POST /inbox/ack'].includes(route)) return null;
+  if (!authed) return json({error: 'Секрет не подходит — сверь его с PLANER_SECRET воркера'}, 401);
+  if (!env.BOT_TOKEN) return json({error: 'В воркере нет секрета BOT_TOKEN'}, 500);
+  switch (route) {
+    case 'POST /setup': { // планер вызывает при подключении: проверяем бота и направляем Телеграм сюда
+      const me = await tg(env, 'getMe', {});
+      if (!me.ok) return json({error: 'Телеграм не принял BOT_TOKEN — скопируй токен у @BotFather заново'}, 400);
+      const hook = await tg(env, 'setWebhook', {url: url.origin + '/telegram', secret_token: await hookSecret(env), allowed_updates: ['message']});
+      if (!hook.ok) return json({error: 'Телеграм: ' + hook.description}, 400);
+      await tg(env, 'setMyCommands', {commands: COMMANDS});
+      return json({bot: me.result.username, linked: !!await env.PLANER.get('chat'), ytKey: !!env.YT_KEY});
+    }
+    case 'POST /snapshot':
+      await kvPut(env, 'snapshot', await req.json());
+      return json({ok: true, linked: !!await env.PLANER.get('chat')});
+    case 'POST /test': {
+      const chat = await env.PLANER.get('chat');
+      if (!chat) return json({error: 'Сначала открой ссылку подключения и нажми «Start» в Телеграме'}, 400);
+      await send(env, chat, await buildReport(env, false));
+      return json({ok: true});
+    }
+    case 'GET /inbox': return json({items: (await kvGet(env, 'inbox')) || []});
+    case 'POST /inbox/ack': {
+      const {ids = []} = await req.json();
+      await kvPut(env, 'inbox', ((await kvGet(env, 'inbox')) || []).filter(i => !ids.includes(i.id)));
+      return json({ok: true});
+    }
+  }
+}
+
+// Каждый час: если по часовому поясу планера наступил час отчёта и сегодня его ещё не было — отправляем
+export async function botScheduled(env) {
+  if (!env.BOT_TOKEN) return;
+  const snap = await kvGet(env, 'snapshot'), chat = await env.PLANER.get('chat');
+  if (!snap || !chat) return;
+  const {date, hour} = localNow(snap.tz);
+  if (hour < (snap.reportHour ?? 9) || await env.PLANER.get('lastReport') === date) return;
+  await env.PLANER.put('lastReport', date);
+  await send(env, chat, await buildReport(env, true));
+}
