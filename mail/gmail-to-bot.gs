@@ -9,8 +9,9 @@ const QUERY = 'in:inbox -category:promotions -category:social -category:forums';
 function checkMail() {
   const props = PropertiesService.getScriptProperties();
   const since = Number(props.getProperty('since')) || Math.floor(Date.now() / 1000) - 3600; // первый запуск — за последний час
-  // свои адреса — чтобы не пересылать собственные ответы. Google иногда отдаёт адрес пустым, поэтому собираем все, какие есть
-  const mine = [Session.getEffectiveUser().getEmail(), Session.getActiveUser().getEmail(), ...GmailApp.getAliases()]
+  // свой адрес — чтобы не пересылать собственные ответы. Google иногда отдаёт его пустым, поэтому берём из двух мест.
+  // Псевдонимы («Отправлять письма как») не учитываем: часто это другой твой ящик, и письма с него тоже нужны.
+  const mine = [Session.getEffectiveUser().getEmail(), Session.getActiveUser().getEmail()]
     .filter(Boolean).map(a => a.toLowerCase());
   let seen = 0;
   const mails = [];
