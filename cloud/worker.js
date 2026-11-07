@@ -9,6 +9,7 @@ import {db, getText, put} from './store.js';
 import {oauthRoute, checkAccess, unauthorized, CORS} from './oauth.js';
 import {handleMcp} from './mcp.js';
 import {TOOLS, makeToolContext} from './tools.js';
+import {loadPlaner, writePlaner} from './planer.js';
 
 const APP_VERSION = Number((html.match(/const APP_VERSION = (\d+)/) || [])[1]) || 0;
 const SESSION_DAYS = 180, KEEP_BACKUP_DAYS = 60;
@@ -90,22 +91,25 @@ async function api(req, env, url) {
       return send(200, {app: 'youtube-planer', version: 5, cloud: true, appVersion: APP_VERSION});
 
     case 'GET /api/data': {
-      const main = await getText(env, 'planer');
-      if (!main) return send(200, {data: null});
-      const data = JSON.parse(main), rivals = await getText(env, 'competitors');
-      if (rivals) data.competitors = JSON.parse(rivals);
-      return send(200, {data});
+      const {data, rev} = await loadPlaner(env);
+      return send(200, {data, rev});
     }
+    case 'GET /api/rev': // открытый планер раз в 20 секунд проверяет, не записал ли что-то Claude или другое устройство
+      return send(200, {rev: Number(await getText(env, 'rev')) || 0});
 
     case 'PUT /api/data': {
       const data = await req.json().catch(() => null);
       if (!data || typeof data !== 'object' || !data.channel || !Array.isArray(data.videos)) return fail(400, 'Это не данные планера');
       const replaced = await storeImages(env, data);
       await backup(env, data);
-      const {competitors = [], ...main} = data, rivals = JSON.stringify(competitors);
-      if (rivals !== await getText(env, 'competitors')) await put(env, 'competitors', rivals); // конкуренты меняются редко
-      await put(env, 'planer', JSON.stringify(main));
-      return send(200, {ok: true, savedAt: Date.now(), appVersion: APP_VERSION, replaced});
+      // планер присылает версию, от которой он отталкивался; если её уже поменял кто-то другой — конфликт, планер сольёт правки сам
+      const base = req.headers.get('x-planer-rev'), before = await getText(env, 'competitors');
+      const saved = await writePlaner(env, data, base == null || base === '' ? null : Number(base), before);
+      if (saved.conflict) {
+        const fresh = await loadPlaner(env);
+        return send(409, {conflict: true, data: fresh.data, rev: fresh.rev, replaced});
+      }
+      return send(200, {ok: true, savedAt: Date.now(), rev: saved.rev, appVersion: APP_VERSION, replaced});
     }
 
     case 'GET /api/backups': {

@@ -371,4 +371,116 @@ export const TOOLS = [
       return L.join('\n');
     }
   },
+  /* ================= запись в планер ================= */
+  {
+    name: 'add_idea', title: 'Добавить идею',
+    description: 'Добавляет идею видео в планер автора: новое видео со стандартными этапами в разделе «Не начатые». ' +
+      'inspiration — ссылка на ролик-источник (конкурент, поиск, тренд) или текст, откуда идея. Одну и ту же ссылку второй раз не добавит. ' +
+      'Название и заметки пиши так, как их писал бы автор: на языке канала, если это вариант названия.',
+    inputSchema: obj({title: {type: 'string', minLength: 1, maxLength: 100, description: 'Рабочее название'},
+      notes: {type: 'string', maxLength: 5000, description: 'О чём видео, хук, почему зайдёт'},
+      type: {type: 'string', enum: ['video', 'short'], description: 'По умолчанию video'},
+      inspiration: {type: 'string', maxLength: 500, description: 'Ссылка на ролик-источник или откуда идея'},
+      deadline: {type: 'string', description: 'Дедлайн выхода YYYY-MM-DD (необязательно)'}}, ['title']),
+    annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false},
+    async run({title, notes = '', type = 'video', inspiration = '', deadline = ''}, ctx) {
+      if (deadline && !/^\d{4}-\d{2}-\d{2}$/.test(deadline)) throw new ToolError('Дедлайн — в формате YYYY-MM-DD.');
+      const ytId = ytIdFrom(inspiration), key = ytId ? 'yt:' + ytId : inspiration ? 'mcp:' + inspiration.slice(0, 120) : '';
+      return P.mutatePlaner(ctx.env, data => {
+        const had = key && data.videos.find(v => v.inspo === key);
+        if (had) return `Эта идея уже есть в планере: [${had.id}] ${had.title}`;
+        const now = Date.now(), uid = () => now.toString(36) + Math.random().toString(36).slice(2, 7);
+        const v = {id: uid(), type, title: title.trim(), notes: [notes.trim(), inspiration && `Вдохновение: ${inspiration}`].filter(Boolean).join('\n\n'),
+          link: '', deadline, thumb: '', inspo: key, createdAt: now, updatedAt: now, by: 'claude',
+          stages: (data.template?.length ? data.template : ['План', 'Сценарий', 'Видеоматериал', 'Монтаж', 'Превью', 'Название, описание, теги', 'Публикация'])
+            .map(name => ({id: uid(), name, done: false, notes: '', deadline: '', pct: 0, rich: true}))};
+        data.videos.unshift(v);
+        return `Добавил идею [${v.id}] «${v.title}» — автор увидит её в планере в «Не начатых».`;
+      });
+    }
+  },
+  {
+    name: 'update_video', title: 'Изменить видео',
+    description: 'Меняет поля видео в планере: название, описание-идею (notes целиком или append_notes — дописать в конец), дедлайн выхода, ссылку на YouTube, тип. ' +
+      'Передавай только то, что меняешь. Чтобы убрать дедлайн — deadline: "".',
+    inputSchema: obj({video: {type: 'string', minLength: 1, description: 'id из планера или часть названия'},
+      title: {type: 'string', minLength: 1, maxLength: 100}, notes: {type: 'string', maxLength: 10000}, append_notes: {type: 'string', maxLength: 10000},
+      deadline: {type: 'string'}, link: {type: 'string', maxLength: 300}, type: {type: 'string', enum: ['video', 'short']}}, ['video']),
+    annotations: {readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false},
+    async run(args, ctx) {
+      if (args.deadline && !/^\d{4}-\d{2}-\d{2}$/.test(args.deadline)) throw new ToolError('Дедлайн — в формате YYYY-MM-DD или пустая строка.');
+      if (args.link && !ytIdFrom(args.link)) throw new ToolError('Это не похоже на ссылку на ролик YouTube.');
+      return P.mutatePlaner(ctx.env, data => {
+        const v = findMyVideo(data, args.video), changed = [];
+        for (const k of ['title', 'notes', 'deadline', 'link', 'type']) if (args[k] !== undefined && args[k] !== v[k]) { v[k] = args[k]; changed.push(k); }
+        if (args.append_notes) { v.notes = [v.notes, args.append_notes.trim()].filter(Boolean).join('\n\n'); changed.push('notes'); }
+        if (!changed.length) return `Ничего не изменилось в [${v.id}] ${v.title}.`;
+        v.updatedAt = Date.now();
+        const RU = {title: 'название', notes: 'описание', deadline: 'дедлайн', link: 'ссылка', type: 'тип'};
+        return `Обновил [${v.id}] «${v.title}»: ${[...new Set(changed)].map(k => RU[k]).join(', ')}.`;
+      });
+    }
+  },
+  {
+    name: 'update_stage', title: 'Записать в этап',
+    description: 'Пишет в этап производства видео (сценарий, план, заметки к монтажу…) и/или меняет его готовность и дедлайн. ' +
+      'append_text дописывает в конец — безопасный вариант. text заменяет весь текст этапа: если в этапе уже что-то написано, нужно явно передать replace: true. ' +
+      'Разметка текста: «## » — название блока, «> » — дополнение/ремарка, «- » — пункт списка, **жирный**. ' +
+      'stage — название этапа («Сценарий») или его номер с 1. create: true добавит этап, если такого нет.',
+    inputSchema: obj({video: {type: 'string', minLength: 1}, stage: {type: 'string', minLength: 1, description: 'Название или номер этапа'},
+      text: {type: 'string', maxLength: 60000}, append_text: {type: 'string', maxLength: 60000}, replace: {type: 'boolean'},
+      progress: {type: 'integer', enum: [0, 25, 50, 75, 100], description: 'Готовность этапа, 100 — сделан'},
+      deadline: {type: 'string', description: 'YYYY-MM-DD или "" чтобы убрать'}, create: {type: 'boolean'}}, ['video', 'stage']),
+    annotations: {readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false},
+    async run(args, ctx) {
+      if (args.text !== undefined && args.append_text !== undefined) throw new ToolError('Передай либо text, либо append_text.');
+      if (args.deadline && !/^\d{4}-\d{2}-\d{2}$/.test(args.deadline)) throw new ToolError('Дедлайн — в формате YYYY-MM-DD или пустая строка.');
+      return P.mutatePlaner(ctx.env, data => {
+        const v = findMyVideo(data, args.video), q = String(args.stage).trim(), low = q.toLowerCase();
+        let s = /^\d+$/.test(q) ? v.stages[Number(q) - 1] : v.stages.find(x => x.name.toLowerCase() === low) || v.stages.find(x => x.name.toLowerCase().includes(low));
+        if (!s) {
+          if (!args.create) throw new ToolError(`В видео «${v.title}» нет этапа «${q}». Этапы: ${v.stages.map((x, i) => `${i + 1}. ${x.name}`).join(', ')}. Передай create: true, чтобы добавить.`);
+          s = {id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7), name: q, done: false, notes: '', deadline: '', pct: 0, rich: true};
+          v.stages.push(s);
+        }
+        const before = P.stageText(s), done = [];
+        if (args.text !== undefined) {
+          if (before && !args.replace) throw new ToolError(`В этапе «${s.name}» уже есть текст (${before.length} знаков). Чтобы заменить его, передай replace: true; чтобы дописать — append_text.`);
+          s.notes = args.text.trim() ? P.textToStageHtml(args.text) : ''; s.rich = true; done.push(args.text.trim() ? 'текст заменён' : 'текст очищен');
+        }
+        if (args.append_text?.trim()) {
+          const html = s.rich ? String(s.notes || '') : P.textToStageHtml(String(s.notes || ''));
+          s.notes = html + P.textToStageHtml(args.append_text); s.rich = true; done.push('текст дописан');
+        }
+        if (args.progress !== undefined) { s.pct = args.progress; s.done = args.progress === 100; done.push(`готовность ${args.progress}%`); }
+        if (args.deadline !== undefined) { s.deadline = args.deadline; done.push(args.deadline ? 'дедлайн ' + args.deadline : 'дедлайн убран'); }
+        if (!done.length) return `Нечего менять: передай text, append_text, progress или deadline.`;
+        v.updatedAt = Date.now();
+        return `Этап «${s.name}» видео [${v.id}] «${v.title}»: ${done.join(', ')}. Готовность видео теперь ${P.progress(v)}%.`;
+      });
+    }
+  },
+  {
+    name: 'add_competitor', title: 'Добавить конкурента',
+    description: 'Добавляет канал в конкуренты планера и загружает его ролики за 2 года с точными типами (видео/Shorts/трансляции) — ' +
+      'после этого канал участвует в «иксах», outliers и title_insights. channel — @ник, ссылка, UC-id или название. ≈5–15 единиц лимита.',
+    inputSchema: obj({channel: {type: 'string', minLength: 1}}, ['channel']),
+    annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true},
+    async run({channel}, ctx) {
+      const ch = await P.findChannel(ctx.env, channel);
+      if (!ch) throw new ToolError(`Канал «${channel}» не найден. Лучше всего работает точный @ник.`);
+      const data = await ctx.data();
+      if (data.channel?.yt?.id === ch.id) throw new ToolError('Это канал самого автора.');
+      if ((data.competitors || []).some(c => c.id === ch.id)) return `«${ch.snippet.title}» уже в конкурентах [${ch.id}].`;
+      const {videos, kindsExact} = await P.channelVideos(ctx.env, ch, {since: Date.now() - 2 * 365 * 864e5, cap: 2000});
+      return P.mutatePlaner(ctx.env, d => {
+        d.competitors ||= [];
+        if (d.competitors.some(c => c.id === ch.id)) return `«${ch.snippet.title}» уже в конкурентах [${ch.id}].`;
+        const now = Date.now(), c = {...P.channelInfo(ch), addedAt: now, lastSeenAt: now, fetchedAt: now, kindsExact, videos};
+        d.competitors.push(c);
+        const hot = videos.map(v => [v, P.xOf(c, v)]).filter(([, x]) => x >= 2).length;
+        return `Добавил конкурента [${c.id}] ${c.title} (${num(c.subs)} подп.): ${plural(videos.length, VIDEOS)} за 2 года, из них выстрелило (×2+) ${hot}.`;
+      });
+    }
+  },
 ];
