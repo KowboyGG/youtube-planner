@@ -4,22 +4,21 @@
 import html from '../youtubeplaner.html';
 import {botRoute, botScheduled} from '../bot/worker.js';
 
+import {hex, sign as signFor, sameText, tooManyFailures, countFailure, page, LOGO} from './util.js';
+import {db, getText, put} from './store.js';
+import {oauthRoute, checkAccess, unauthorized, CORS} from './oauth.js';
+import {handleMcp} from './mcp.js';
+import {TOOLS, makeToolContext} from './tools.js';
+
 const APP_VERSION = Number((html.match(/const APP_VERSION = (\d+)/) || [])[1]) || 0;
 const SESSION_DAYS = 180, KEEP_BACKUP_DAYS = 60;
 const IMAGE_TYPES = {jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif'};
-const enc = new TextEncoder();
-const hex = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 const send = (status, obj, headers = {}) => new Response(JSON.stringify(obj), {status, headers: {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers}});
 const fail = (status, message) => send(status, {error: {message}});
 const localDay = () => new Date().toISOString().slice(0, 10);
 
 /* ----- вход: подписанная кука на полгода ----- */
-const hmacKey = env => crypto.subtle.importKey('raw', enc.encode('session:' + env.PLANER_SECRET), {name: 'HMAC', hash: 'SHA-256'}, false, ['sign']);
-const sign = async (env, text) => hex(await crypto.subtle.sign('HMAC', await hmacKey(env), enc.encode(text)));
-async function sameText(a, b) { // сравнение без утечки по времени: сравниваем хэши
-  const [x, y] = await Promise.all([a, b].map(t => crypto.subtle.digest('SHA-256', enc.encode(String(t)))));
-  return crypto.subtle.timingSafeEqual ? crypto.subtle.timingSafeEqual(x, y) : hex(x) === hex(y);
-}
+const sign = (env, text) => signFor(env, 'session', text);
 async function makeSession(env) {
   const exp = Date.now() + SESSION_DAYS * 864e5;
   return `v1.${exp}.${await sign(env, 'v1.' + exp)}`;
@@ -30,40 +29,19 @@ async function validSession(req, env) {
 }
 const sessionCookie = (value, maxAge) => `planer_session=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 
-function loginPage(error = '') {
-  return new Response(`<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Вход — YouTube-планер</title><style>
-:root{color-scheme:dark}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0f0f0f;color:#f1f1f1;font:15px Roboto,"Segoe UI",Arial,sans-serif;padding:16px;box-sizing:border-box}
-form{width:100%;max-width:340px;background:#212121;border-radius:16px;padding:28px;display:grid;gap:14px}
-h1{margin:0;font-size:22px;display:flex;align-items:center;gap:10px}input,button{font:inherit;height:44px;border-radius:22px;border:1px solid #303030;padding:0 18px}
-input{background:#121212;color:inherit;outline:none}input:focus{border-color:#1c62b9}button{background:#f1f1f1;color:#0f0f0f;border:0;font-weight:500;cursor:pointer}
-.err{color:#ff7a7a;font-size:13px}.hint{color:#aaa;font-size:12px;line-height:1.5}</style></head><body>
-<form method="post" action="/login"><h1><svg width="30" height="21" viewBox="0 0 30 21"><rect width="30" height="21" rx="6" fill="#ff0033"/><path d="M12 6v9l8-4.5z" fill="#fff"/></svg>Планер</h1>
+const loginPage = (error = '') => page('Вход', `<form method="post" action="/login"><h1>${LOGO}Планер</h1>
 <input type="password" name="password" placeholder="Пароль" autofocus autocomplete="current-password" required>
 ${error ? `<div class="err">${error}</div>` : ''}<button>Войти</button>
-<div class="hint">Пароль — значение секрета PLANER_SECRET в настройках воркера Cloudflare.</div></form></body></html>`,
-    {status: error ? 401 : 200, headers: {'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store'}});
-}
+<div class="hint">Пароль — значение секрета PLANER_SECRET в настройках воркера Cloudflare.</div></form>`, error ? 401 : 200);
 async function login(req, env) {
-  const ip = req.headers.get('cf-connecting-ip') || 'x', key = 'login-fail:' + ip, fails = Number(await env.PLANER.get(key)) || 0;
-  if (fails >= 10) return loginPage('Слишком много попыток — подожди 15 минут.');
+  if (await tooManyFailures(env, req)) return loginPage('Слишком много попыток — подожди 15 минут.');
   const password = String((await req.formData()).get('password') || '');
   if (!await sameText(password, env.PLANER_SECRET)) {
-    await env.PLANER.put(key, String(fails + 1), {expirationTtl: 900});
+    await countFailure(env, req);
     return loginPage('Пароль не подходит.');
   }
   return new Response(null, {status: 303, headers: {location: '/', 'set-cookie': sessionCookie(await makeSession(env), SESSION_DAYS * 86400)}});
 }
-
-/* ----- хранилище: одна таблица «ключ → значение» в D1 ----- */
-let tableReady;
-const db = env => (tableReady ||= env.DB.exec('CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v BLOB, t INTEGER)')).then(() => env.DB);
-async function getText(env, k) {
-  const row = await (await db(env)).prepare('SELECT v FROM kv WHERE k = ?').bind(k).first();
-  return row ? (typeof row.v === 'string' ? row.v : new TextDecoder().decode(new Uint8Array(row.v))) : null;
-}
-const put = async (env, k, v) => (await db(env)).prepare('INSERT INTO kv (k, v, t) VALUES (?, ?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v, t = excluded.t')
-  .bind(k, v, Date.now()).run();
 
 // Картинки, пришедшие из страницы как data:image/…, кладём отдельными записями и заменяем на путь
 async function storeImages(env, data) {
@@ -174,6 +152,14 @@ export default {
     // планер в облаке ходит к боту по куке (с заголовком x-planer), локальный — по Bearer-секрету
     const bot = await botRoute(req, env, ctx, url, bearer || (session && req.headers.get('x-planer') === '1'));
     if (bot) return bot;
+    // MCP для Claude: вход по OAuth (страница «Разрешить доступ») или Bearer PLANER_SECRET
+    const oauth = await oauthRoute(req, env, url, session);
+    if (oauth) return oauth;
+    if (url.pathname === '/mcp') {
+      const access = await checkAccess(req, env);
+      if (!access.ok) return unauthorized(url.origin, access.invalid);
+      return handleMcp(req, {tools: TOOLS, makeContext: () => makeToolContext(env, ctx), cors: CORS});
+    }
     if (url.pathname === '/login') return req.method === 'POST' ? login(req, env) : loginPage();
     if (url.pathname === '/logout') return new Response(null, {status: 303, headers: {location: '/', 'set-cookie': sessionCookie('', 0)}});
     if (url.pathname === '/favicon.ico') return new Response(null, {status: 204});
