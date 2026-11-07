@@ -2,6 +2,7 @@
 // Ответы — компактный текст: Claude читает его как человек, а id в квадратных скобках использует для следующих вызовов.
 import {ToolError} from './mcp.js';
 import * as P from './planer.js';
+import * as A from './analytics.js';
 
 const {num, x1, fmtDur, daysAgo, ytIdFrom} = P;
 const plural = (n, [one, few, many]) => { const a = n % 10, b = n % 100; return `${num(n)} ${a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many}`; };
@@ -12,6 +13,24 @@ const READ = {readOnlyHint: true, destructiveHint: false, idempotentHint: true, 
 const READ_WEB = {...READ, openWorldHint: true};
 const obj = (properties, required = []) => ({type: 'object', properties, required, additionalProperties: false});
 const KIND = {type: 'string', enum: ['all', 'video', 'short'], description: 'all — всё; video — обычные видео; short — Shorts'};
+
+const TRAFFIC_RU = {YT_SEARCH: 'поиск YouTube', RELATED_VIDEO: 'рекомендуемые', BROWSE: 'главная и лента', SUBSCRIBER: 'подписки', CHANNEL: 'страница канала',
+  YT_CHANNEL: 'страница канала', EXT_URL: 'внешние сайты', NO_LINK_OTHER: 'прямые и другое', PLAYLIST: 'плейлисты', NOTIFICATION: 'уведомления',
+  END_SCREEN: 'конечные заставки', SHORTS: 'лента Shorts', YT_OTHER_PAGE: 'другие страницы YouTube', HASHTAGS: 'хэштеги', ADVERTISING: 'реклама'};
+// CTR и показы из ежедневных отчётов, сохранённых в планере, — за последние days дней
+function reachFor(reach, days) {
+  const out = {impr: 0, clicks: 0, ctr: 0, videos: {}}, from = P.isoPlus(P.todayIso(), -days);
+  for (const [d, vids] of Object.entries(reach?.days || {})) {
+    if (d < from) continue;
+    for (const [id, [impr, ctr]] of Object.entries(vids)) {
+      const o = out.videos[id] ||= {impr: 0, clicks: 0};
+      o.impr += impr; o.clicks += impr * ctr; out.impr += impr; out.clicks += impr * ctr;
+    }
+  }
+  out.ctr = out.impr ? out.clicks / out.impr : 0;
+  for (const o of Object.values(out.videos)) o.ctr = o.impr ? o.clicks / o.impr : 0;
+  return out;
+}
 
 export async function makeToolContext(env, ctx) {
   let loaded;
@@ -368,6 +387,75 @@ export const TOOLS = [
           words.length ? 'Слова и пары, которые встречаются у конкурентов: ' + words.map(r => `${r.t} ${x1(r.x)}`).join(', ') : 'Его слова у конкурентов почти не встречаются — не с чем сравнить.',
           'Приёмы в нём: ' + (st.patterns.filter(p => p.x != null && p.fn(title)).map(p => `${p.t} ${x1(p.x)}`).join(', ') || 'нет'));
       }
+      return L.join('\n');
+    }
+  },
+  /* ================= YouTube Analytics (нужен Google, подключённый к облаку) ================= */
+  {
+    name: 'channel_analytics', title: 'Аналитика канала',
+    description: 'Закрытая аналитика канала автора из YouTube Analytics за период: просмотры, часы, средний просмотр, подписчики, ' +
+      'динамика (вторая половина периода против первой), лучшие дни, видео с досмотром, средним временем, подписками, CTR и показами превью, ' +
+      'источники трафика. Нужен Google, подключённый к облачному планеру. Лимит YouTube Data API не тратит.',
+    inputSchema: obj({days: {type: 'integer', enum: [7, 28, 90, 365], description: 'Период, по умолчанию 28'},
+      limit: {type: 'integer', minimum: 1, maximum: 50, description: 'Сколько видео показать, по умолчанию 15'}}),
+    annotations: READ_WEB,
+    async run({days = 28, limit = 15}, ctx) {
+      const [an, traffic, data] = await Promise.all([A.channelAnalytics(ctx.env, days), A.channelTraffic(ctx.env, days).catch(() => []), ctx.data()]);
+      const s = (rows, k) => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0), views = s(an.daily, 'views'), minutes = s(an.daily, 'minutes');
+      const half = Math.floor(an.daily.length / 2), a1 = an.daily.slice(0, half), a2 = an.daily.slice(half);
+      const change = (k) => { const x = s(a1, k), y = s(a2, k); return x ? `${y >= x ? '+' : ''}${Math.round((y - x) / x * 100)}%` : '—'; };
+      const best = an.daily.slice().sort((a, b) => b.views - a.views).slice(0, 3);
+      const reach = reachFor(data.reach, days), byYt = new Map(data.videos.filter(v => v.yt).map(v => [v.yt.id, v]));
+      const L = [`YouTube Analytics за ${days} дн. (${an.start} — ${an.end}):`,
+        `Просмотры ${num(views)}, часы просмотра ${num(minutes / 60)}, средний просмотр ${fmtDur(views ? minutes * 60 / views : 0)}, подписчики ${s(an.daily, 'subs') >= 0 ? '+' : ''}${num(s(an.daily, 'subs'))}` +
+          (reach.impr ? `, показы превью ${num(reach.impr)}, CTR ${(reach.ctr * 100).toFixed(1).replace('.', ',')}%` : ''),
+        `Динамика (вторая половина периода к первой): просмотры ${change('views')}, часы ${change('minutes')}, подписчики ${change('subs')}`,
+        'Лучшие дни: ' + best.map(r => `${r.day} — ${num(r.views)}`).join(', ')];
+      const vids = Object.entries(an.videos).map(([id, m]) => ({id, ...m})).sort((a, b) => b.views - a.views).slice(0, limit);
+      if (vids.length) L.push('', 'Видео за период (просмотры | досмотр | средний просмотр | подписки | показы | CTR):', ...vids.map(m => {
+        const v = byYt.get(m.id), rc = reach.videos[m.id];
+        return `- ${v ? `[${v.id}] ${v.title || v.yt.title}` : 'youtube:' + m.id} | ${num(m.views)} | ${Math.round(m.avgPct)}% | ${fmtDur(m.avgDur)} | +${num(m.subs)} | ` +
+          (rc?.impr ? `${num(rc.impr)} | ${(rc.ctr * 100).toFixed(1).replace('.', ',')}%` : '— | —');
+      }));
+      if (traffic.length) { const t = traffic.reduce((a, r) => a + r.views, 0); L.push('', 'Источники трафика: ' + traffic.slice(0, 8).map(r => `${TRAFFIC_RU[r.insightTrafficSourceType] || r.insightTrafficSourceType} ${Math.round(r.views / t * 100)}%`).join(', ')); }
+      if (!reach.impr) L.push('', data.reach?.jobId ? 'CTR: отчёт заказан, данные появятся через 1–2 дня после заказа.' : 'CTR: отчёт ещё не заказан — автору нужно один раз нажать «Обновить CTR и удержание» в «Аналитике».');
+      return L.join('\n');
+    }
+  },
+  {
+    name: 'video_analytics', title: 'Аналитика видео',
+    description: 'Закрытая аналитика одного видео автора: просмотры и часы за период, средний досмотр и время, подписки, лайки, репосты, ' +
+      'кривая удержания по точкам и три самых сильных провала зрителей с таймкодами (где переделать сценарий), источники трафика, CTR и показы превью. ' +
+      'video — id из планера, ссылка или часть названия. Нужен Google, подключённый к облачному планеру.',
+    inputSchema: obj({video: {type: 'string', minLength: 1}, days: {type: 'integer', enum: [7, 28, 90, 365], description: 'По умолчанию 28; для старых видео бери 365'}}, ['video']),
+    annotations: READ_WEB,
+    async run({video, days = 28}, ctx) {
+      const data = await ctx.data(), v = findMyVideo(data, video);
+      if (!v.yt?.id) throw new ToolError(`«${v.title}» ещё не вышло — аналитики нет.`);
+      const a = await A.videoAnalytics(ctx.env, v.yt.id, days), t = a.totals, dur = v.yt.duration || 0;
+      const L = [`[${v.id}] ${v.title || v.yt.title} — YouTube Analytics за ${days} дн. (${a.start} — ${a.end}), длительность ${fmtDur(dur)}`];
+      if (t) L.push(`Просмотры ${num(t.views)}, часы ${num(t.estimatedMinutesWatched / 60)}, средний досмотр ${Math.round(t.averageViewPercentage)}%, средний просмотр ${fmtDur(t.averageViewDuration)}, ` +
+        `подписки +${num(t.subscribersGained)}, лайки ${num(t.likes)}, комментарии ${num(t.comments)}, репосты ${num(t.shares)}`);
+      const rc = reachFor(data.reach, days).videos[v.yt.id];
+      if (rc?.impr) L.push(`Показы превью ${num(rc.impr)}, CTR ${(rc.ctr * 100).toFixed(1).replace('.', ',')}%`);
+      const r = a.retention;
+      if (r.length) {
+        const at = x => r.reduce((b, p) => Math.abs(p[0] - x) < Math.abs(b[0] - x) ? p : b);
+        L.push('Удержание (доля зрителей в этот момент; больше 100% — пересматривают): ' +
+          [0.05, 0.1, 0.25, 0.5, 0.75, 0.95].map(x => `${fmtDur(x * dur)} (${Math.round(x * 100)}%) — ${Math.round(at(x)[1] * 100)}%`).join(', '));
+        // провалы ищем окнами по 5% ролика (не по соседним точкам — там шум) и без перекрытий
+        const w = Math.max(1, Math.round(r.length * 0.05)), first = Math.max(0, r.findIndex(p => p[0] >= 0.02)), wins = [];
+        for (let i = first; i + w < r.length; i++) wins.push({i, d: r[i][1] - r[i + w][1]});
+        const pickTop = (list, n) => { const out = []; for (const x of list) if (out.length < n && out.every(o => Math.abs(o.i - x.i) >= w)) out.push(x); return out; };
+        const span = x => `${fmtDur(r[x.i][0] * dur)}–${fmtDur(r[x.i + w][0] * dur)}`;
+        L.push(`Старт: к ${fmtDur(r[first][0] * dur)} остаётся ${Math.round(r[first][1] * 100)}% зрителей.`);
+        const drops = pickTop(wins.filter(x => x.d > 0.005).sort((a, b) => b.d - a.d), 3);
+        if (drops.length) L.push('Где уходят сильнее всего: ' + drops.map(x => `${span(x)} −${Math.round(x.d * 100)} п.п.`).join('; '));
+        const bumps = pickTop(wins.filter(x => x.d < -0.01).sort((a, b) => a.d - b.d), 2);
+        if (bumps.length) L.push('Пересматривают: ' + bumps.map(x => `${span(x)} +${Math.round(-x.d * 100)} п.п.`).join('; '));
+      }
+      if (a.traffic.length) { const tt = a.traffic.reduce((s, [, n]) => s + n, 0); L.push('Источники трафика: ' + a.traffic.slice(0, 8).map(([k, n]) => `${TRAFFIC_RU[k] || k} ${Math.round(n / tt * 100)}%`).join(', ')); }
+      if (a.daily.length) L.push('Просмотры по дням (последние 14): ' + a.daily.slice(-14).map(d => `${d.day.slice(5)} ${num(d.views)}`).join(', '));
       return L.join('\n');
     }
   },
