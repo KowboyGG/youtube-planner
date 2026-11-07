@@ -10,6 +10,9 @@ import {oauthRoute, checkAccess, unauthorized, CORS} from './oauth.js';
 import {handleMcp} from './mcp.js';
 import {TOOLS, makeToolContext} from './tools.js';
 import {loadPlaner, writePlaner} from './planer.js';
+import {googleRoute, googleStatus, googleDisconnect} from './google.js';
+import {refreshAnalytics, refreshVideoAnalytics} from './analytics.js';
+import {ToolError} from './mcp.js';
 
 const APP_VERSION = Number((html.match(/const APP_VERSION = (\d+)/) || [])[1]) || 0;
 const SESSION_DAYS = 180, KEEP_BACKUP_DAYS = 60;
@@ -94,6 +97,23 @@ async function api(req, env, url) {
       const {data, rev} = await loadPlaner(env);
       return send(200, {data, rev});
     }
+    // постоянный доступ облака к YouTube Analytics (cloud/google.js)
+    case 'GET /api/google/status':
+      return send(200, await googleStatus(env));
+    case 'POST /api/google/disconnect':
+      await googleDisconnect(env);
+      return send(200, {ok: true});
+    case 'POST /api/analytics/refresh': case 'POST /api/analytics/video': {
+      const body = await req.json().catch(() => ({})), days = [7, 28, 90, 365].includes(body.days) ? body.days : 28;
+      try {
+        if (url.pathname.endsWith('/refresh')) return send(200, {ok: true, ...await refreshAnalytics(env, days)});
+        return send(200, {ok: true, analytics: await refreshVideoAnalytics(env, String(body.id || ''), days)});
+      } catch (e) {
+        if (e instanceof ToolError) return fail(400, e.message);
+        throw e;
+      }
+    }
+
     case 'GET /api/rev': // открытый планер раз в 20 секунд проверяет, не записал ли что-то Claude или другое устройство
       return send(200, {rev: Number(await getText(env, 'rev')) || 0});
 
@@ -159,6 +179,8 @@ export default {
     // MCP для Claude: вход по OAuth (страница «Разрешить доступ») или Bearer PLANER_SECRET
     const oauth = await oauthRoute(req, env, url, session);
     if (oauth) return oauth;
+    const google = await googleRoute(req, env, url, session);
+    if (google) return google;
     if (url.pathname === '/mcp') {
       const access = await checkAccess(req, env);
       if (!access.ok) return unauthorized(url.origin, access.invalid);
