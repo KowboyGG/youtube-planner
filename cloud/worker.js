@@ -14,6 +14,7 @@ import {googleRoute, googleStatus, googleDisconnect} from './google.js';
 import {refreshAnalytics, refreshVideoAnalytics} from './analytics.js';
 import {ToolError} from './mcp.js';
 import {dailyAnalytics} from './jobs.js';
+import {collectSnapshot} from './snapshots.js';
 
 const APP_VERSION = Number((html.match(/const APP_VERSION = (\d+)/) || [])[1]) || 0;
 const SESSION_DAYS = 180, KEEP_BACKUP_DAYS = 60;
@@ -204,10 +205,11 @@ export default {
     return fail(404, 'Не найдено');
   },
 
-  // Раз в час: свежая аналитика (раз в сутки), затем утренний отчёт бота — он уже видит свежие часы до монетизации
+  // Раз в час: свежая аналитика (раз в сутки), снимок цифр (раз в 6 часов), затем утренний отчёт бота — уже со свежими данными
   async scheduled(event, env, ctx) {
     const log = async (name, job) => { try { console.log(name + ':', (await job()) ?? 'готово'); } catch (e) { console.log(name + ' упал:', e.stack || e); } };
     await log('аналитика', () => dailyAnalytics(env));
+    await log('снимок', () => collectSnapshot(env));
     await log('бот', () => botScheduled(env));
   }
 };

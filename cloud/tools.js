@@ -3,6 +3,7 @@
 import {ToolError} from './mcp.js';
 import * as P from './planer.js';
 import * as A from './analytics.js';
+import {loadSnapshots, SNAP_EVERY} from './snapshots.js';
 
 const {num, x1, fmtDur, daysAgo, ytIdFrom} = P;
 const plural = (n, [one, few, many]) => { const a = n % 10, b = n % 100; return `${num(n)} ${a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many}`; };
@@ -30,6 +31,15 @@ function reachFor(reach, days) {
   out.ctr = out.impr ? out.clicks / out.impr : 0;
   for (const o of Object.values(out.videos)) o.ctr = o.impr ? o.clicks / o.impr : 0;
   return out;
+}
+
+const ageText = t => { const h = Math.round((Date.now() - t) / 3600e3); return h < 1 ? 'только что' : h < 48 ? `${h} ч назад` : `${Math.round(h / 24)} дн. назад`; };
+// Названия роликов и каналов по id — из данных планера
+function titleIndex(data) {
+  const m = new Map();
+  for (const v of data.videos || []) if (v.yt?.id) m.set(v.yt.id, {title: v.title || v.yt.title});
+  for (const c of data.competitors || []) { m.set(c.id, {title: c.title}); for (const v of c.videos || []) m.set(v.id, {title: v.title}); }
+  return m;
 }
 
 export async function makeToolContext(env, ctx) {
@@ -204,7 +214,7 @@ export const TOOLS = [
         const vids = c.videos.filter(v => P.kindOf(v) === 'video' && !v.upcoming), month = c.videos.filter(v => daysAgo(v.publishedAt) <= 30).length;
         const best = c.videos.filter(v => daysAgo(v.publishedAt) <= 90).map(v => [v, P.xOf(c, v)]).filter(([, x]) => x).sort((a, b) => b[1] - a[1])[0];
         return `- [${c.id}] ${c.title} (${c.handle}) — ${c.hiddenSubs ? 'подписчики скрыты' : num(c.subs) + ' подп.'}, медиана видео ${num(P.median(vids.map(v => v.views)))}, ` +
-          `за 30 дн. ${plural(month, VIDEOS)}, в планере ${plural(c.videos.length, VIDEOS)}${best ? `, лучший за 90 дн.: «${clip(best[0].title, 70)}» ${x1(best[1])}` : ''}, данные на ${c.fetchedAt ? day(new Date(c.fetchedAt).toISOString()) : '—'}`;
+          `за 30 дн. ${plural(month, VIDEOS)}, в планере ${plural(c.videos.length, VIDEOS)}${best ? `, лучший за 90 дн.: «${clip(best[0].title, 70)}» ${x1(best[1])}` : ''}, данные на ${(c.fetchedAt || c.snapAt) ? day(new Date(Math.max(c.fetchedAt || 0, c.snapAt || 0)).toISOString()) : '—'}`;
       })].join('\n');
     }
   },
@@ -233,7 +243,7 @@ export const TOOLS = [
         .map(v => ({v, x: P.xOf(c, v)})).sort({recent: (a, b) => Date.parse(b.v.publishedAt) - Date.parse(a.v.publishedAt),
           views: (a, b) => b.v.views - a.v.views, x: (a, b) => (b.x || 0) - (a.x || 0)}[sort]);
       return [`${c.title} (${c.handle}), ${num(c.subs)} подп. За ${days} дн.: ${plural(list.length, VIDEOS)}${list.length > limit ? `, показаны ${limit}` : ''}. ` +
-        `Медиана: видео ${num(P.kindMedian(c, 'video'))}, Shorts ${num(P.kindMedian(c, 'short'))}. Данные на ${day(new Date(c.fetchedAt || Date.now()).toISOString())}.`,
+        `Медиана: видео ${num(P.kindMedian(c, 'video'))}, Shorts ${num(P.kindMedian(c, 'short'))}. Данные на ${day(new Date(Math.max(c.fetchedAt || 0, c.snapAt || 0) || Date.now()).toISOString())}.`,
         ...list.slice(0, limit).map(({v, x}) => '- ' + rivalVideoLine(null, v, x))].join('\n');
     }
   },
@@ -456,6 +466,81 @@ export const TOOLS = [
       }
       if (a.traffic.length) { const tt = a.traffic.reduce((s, [, n]) => s + n, 0); L.push('Источники трафика: ' + a.traffic.slice(0, 8).map(([k, n]) => `${TRAFFIC_RU[k] || k} ${Math.round(n / tt * 100)}%`).join(', ')); }
       if (a.daily.length) L.push('Просмотры по дням (последние 14): ' + a.daily.slice(-14).map(d => `${d.day.slice(5)} ${num(d.views)}`).join(', '));
+      return L.join('\n');
+    }
+  },
+  /* ================= динамика по снимкам (облако снимает цифры раз в 6 часов) ================= */
+  {
+    name: 'momentum', title: 'Что разгоняется',
+    description: 'Ролики, которые прямо сейчас набирают быстрее обычного: прирост просмотров за последние hours часов по снимкам облака ' +
+      '(раз в 6 часов) и сравнение с обычным темпом того же канала («×5 к обычному темпу» — ролик набирает в 5 раз быстрее типичного ролика канала). ' +
+      'Покрывает свежие ролики (до 60 дней) конкурентов и все видео автора. Бесплатно.',
+    inputSchema: obj({hours: {type: 'integer', minimum: 6, maximum: 168, description: 'Окно, по умолчанию 24'},
+      scope: {type: 'string', enum: ['all', 'competitors', 'mine'], description: 'По умолчанию all'},
+      limit: {type: 'integer', minimum: 1, maximum: 50, description: 'По умолчанию 15'}}),
+    annotations: READ,
+    async run({hours = 24, scope = 'all', limit = 15}, ctx) {
+      const snaps = await loadSnapshots(ctx.env, Math.ceil(hours / 24) + 2);
+      const data = await ctx.data(), own = data.channel?.yt?.id;
+      if (snaps.length < 2) return snaps.length ? `Снимки только начали копиться (первый — ${ageText(snaps[0].t)}). Прирост появится после следующего снимка (раз в 6 часов).`
+        : 'Снимков ещё нет: облако снимает цифры раз в 6 часов, первый появится в ближайшие часы.';
+      const now = snaps.at(-1), want = now.t - hours * 3600e3;
+      // базовый снимок — ближайший к нужному моменту, но не моложе 3/4 окна
+      const base = snaps.filter(sn => sn.t <= now.t - hours * 0.75 * 3600e3).sort((a, b) => Math.abs(a.t - want) - Math.abs(b.t - want))[0];
+      if (!base) return `Для окна ${hours} ч данных мало: самый старый снимок — ${ageText(snaps[0].t)}. Попробуй hours: ${Math.max(6, Math.floor((now.t - snaps[0].t) / 3600e3 / 6) * 6) || 6} или подожди.`;
+      const span = (now.t - base.t) / 3600e3, names = titleIndex(data);
+      const rows = [];
+      for (const [id, [views, , , ch, published, title]] of Object.entries(now.v)) {
+        if (scope === 'mine' && ch !== own || scope === 'competitors' && ch === own) continue;
+        const was = base.v[id], isNew = !was && Date.parse(published) > base.t;
+        if (!was && !isNew) continue;
+        const from = was ? was[0] : 0, hrs = was ? span : Math.max(1, (now.t - Date.parse(published)) / 3600e3);
+        rows.push({id, ch, gain: views - from, perHour: (views - from) / hrs, views, published, isNew, title});
+      }
+      // обычный темп канала: медиана прироста в час у его роликов от 3 дней (совсем новые всегда растут быстро)
+      const typical = {};
+      for (const ch of new Set(rows.map(r => r.ch))) {
+        const pool = rows.filter(r => r.ch === ch && !r.isNew && Date.now() - Date.parse(r.published) > 3 * 864e5).map(r => r.perHour);
+        typical[ch] = pool.length >= 3 ? P.median(pool) : null;
+      }
+      const scored = rows.filter(r => r.gain > 0).map(r => ({...r, x: typical[r.ch] ? r.perHour / Math.max(typical[r.ch], 0.5) : null}))
+        .sort((a, b) => (b.x ?? 0) - (a.x ?? 0) || b.perHour - a.perHour).slice(0, limit);
+      if (!scored.length) return `За последние ${Math.round(span)} ч прироста нет.`;
+      return [`Прирост за ${Math.round(span)} ч (снимки ${ageText(base.t)} → ${ageText(now.t)}), сверху — кто набирает быстрее обычного для своего канала:`,
+        ...scored.map(r => {
+          const n = names.get(r.id), chName = r.ch === own ? 'твой канал' : names.get(r.ch)?.title || r.ch;
+          return `- ${n?.title || r.title || 'youtube:' + r.id} — ${chName}: +${num(r.gain)} (${num(r.perHour)}/ч)${r.x != null ? `, ${x1(r.x)} к обычному темпу канала` : ''}` +
+            `${r.isNew ? ', новый ролик' : ''}, всего ${num(r.views)}, вышел ${daysAgo(r.published)} дн. назад, youtube:${r.id}`;
+        })].join('\n');
+    }
+  },
+  {
+    name: 'channel_history', title: 'История роста канала',
+    description: 'Подписчики и просмотры канала по дням по снимкам облака (копятся с момента подключения, до 120 дней): ' +
+      'прирост в день, ускорение или замедление, новые ролики. channel — "mine" (по умолчанию) или конкурент (id, @ник, часть названия). Бесплатно.',
+    inputSchema: obj({channel: {type: 'string', description: '"mine" или конкурент'}, days: {type: 'integer', minimum: 2, maximum: 120, description: 'По умолчанию 30'}}),
+    annotations: READ,
+    async run({channel = 'mine', days = 30}, ctx) {
+      const data = await ctx.data(), mine = /^(mine|мой|я|свой)$/i.test(channel.trim());
+      const c = mine ? {id: data.channel?.yt?.id, title: data.channel?.name} : findCompetitor(data, channel);
+      if (!c.id) throw new ToolError('Канал автора ещё не синхронизирован с YouTube.');
+      const snaps = (await loadSnapshots(ctx.env, days)).filter(sn => sn.ch[c.id]);
+      if (snaps.length < 2) return `По «${c.title}» снимков пока ${snaps.length}: история копится раз в 6 часов с момента подключения облака.`;
+      const byDay = new Map(); // последний снимок каждого дня
+      for (const sn of snaps) byDay.set(new Date(sn.t).toISOString().slice(0, 10), sn.ch[c.id]);
+      const rows = [...byDay].map(([d, [subs, views, vids]], i, arr) => {
+        const prev = arr[i - 1]?.[1];
+        return {d, subs, views, vids, ds: prev ? subs - prev[0] : null, dv: prev ? views - prev[1] : null, dn: prev ? vids - prev[2] : null};
+      });
+      const first = snaps[0].ch[c.id], last = snaps.at(-1).ch[c.id], spanDays = Math.max(1 / 4, (snaps.at(-1).t - snaps[0].t) / 864e5);
+      const half = Math.floor(rows.length / 2), avg = (list, k) => { const v = list.filter(r => r[k] != null); return v.length ? v.reduce((s, r) => s + r[k], 0) / v.length : 0; };
+      const L = [`${c.title}: история за ${rows.length} дн. (${rows[0].d} — ${rows.at(-1).d})`,
+        `Подписчики ${num(first[0])} → ${num(last[0])} (${last[0] - first[0] >= 0 ? '+' : ''}${num(last[0] - first[0])}, ≈${(((last[0] - first[0]) / spanDays)).toFixed(1).replace('.', ',')} в день); ` +
+        `просмотры +${num(last[1] - first[1])} (≈${num((last[1] - first[1]) / spanDays)} в день); новых роликов ${num(last[2] - first[2])}`];
+      if (rows.length >= 6) L.push(`Темп: подписчики в день ${avg(rows.slice(0, half), 'ds').toFixed(1).replace('.', ',')} → ${avg(rows.slice(half), 'ds').toFixed(1).replace('.', ',')}, ` +
+        `просмотры в день ${num(avg(rows.slice(0, half), 'dv'))} → ${num(avg(rows.slice(half), 'dv'))} (первая половина → вторая)`);
+      L.push('По дням (подписчики | просмотры за день | новые ролики):', ...rows.slice(-31).map(r =>
+        `- ${r.d}: ${num(r.subs)}${r.ds != null ? ` (${r.ds >= 0 ? '+' : ''}${num(r.ds)})` : ''} | ${r.dv != null ? '+' + num(r.dv) : '—'} | ${r.dn ? '+' + r.dn : '—'}`));
       return L.join('\n');
     }
   },

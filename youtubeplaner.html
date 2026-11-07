@@ -819,7 +819,10 @@ function mergeStates(local, remote, base) {
     v.updatedAt = Math.max(l.updatedAt || 0, r.updatedAt || 0);
     return v;
   }, true);
-  out.competitors = mergeList(local.competitors, remote.competitors, base?.competitors, (l, r) => (r.fetchedAt || 0) > (l.fetchedAt || 0) ? r : l, false);
+  // конкурент: менялся только с одной стороны — берём эту сторону (облако само обновляет цифры раз в 6 часов); с обеих — более свежий
+  const fresh = c => Math.max(c.fetchedAt || 0, c.snapAt || 0);
+  out.competitors = mergeList(local.competitors, remote.competitors, base?.competitors,
+    (l, r, b) => sameJson(l, b) ? r : sameJson(r, b) ? l : fresh(r) > fresh(l) ? r : l, false);
   out.channel = mergeFields(local.channel, remote.channel, base?.channel);
   out.updatedAt = Date.now();
   return out;
