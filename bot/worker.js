@@ -1,3 +1,4 @@
+import {loadPlaner} from '../cloud/planer.js';
 // Telegram-бот YouTube-планера — часть облачного воркера (cloud/worker.js).
 // Планер присылает сюда короткую сводку (дедлайны, часы для монетизации, id роликов, «выстрелившее» у конкурентов),
 // а бот каждое утро добавляет к ней свежие цифры с YouTube и шлёт отчёт. Идеи, присланные боту, ждут здесь,
@@ -18,6 +19,16 @@ const COMMANDS = [['report', 'Отчёт прямо сейчас'], ['deadlines'
   .map(([command, description]) => ({command, description}));
 
 const kvGet = async (env, k) => JSON.parse(await env.PLANER.get(k) || 'null');
+// Сводку присылает открытый планер; часы до монетизации облако обновляет само раз в сутки — берём более свежие
+async function freshSnapshot(env) {
+  const snap = await kvGet(env, 'snapshot');
+  if (!snap) return null;
+  try {
+    const {data} = await loadPlaner(env);
+    if (data?.ypp?.fetchedAt && data.ypp.fetchedAt > (snap.ypp?.at || 0)) snap.ypp = {hours: Math.round(data.ypp.hours), at: data.ypp.fetchedAt};
+  } catch (e) {}
+  return snap;
+}
 const kvPut = (env, k, v) => env.PLANER.put(k, JSON.stringify(v));
 async function tg(env, method, body) {
   const r = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`,
@@ -76,7 +87,7 @@ function moneyLines(snap, subs) {
 
 // morning — утренний отчёт по расписанию: запоминаем цифры как точку отсчёта на следующие сутки
 async function buildReport(env, morning) {
-  const snap = await kvGet(env, 'snapshot');
+  const snap = await freshSnapshot(env);
   if (!snap) return 'Планер ещё не прислал данные — открой его на компьютере.';
   const today = localNow(snap.tz).date;
   const L = [`☀️ <b>${esc(snap.channelName)}</b> — ${new Date().toLocaleDateString('ru-RU', {day: 'numeric', month: 'long', timeZone: snap.tz || 'UTC'})}`, ''];
@@ -135,7 +146,7 @@ async function onTelegram(env, upd) {
     return send(env, chat, lines.length ? '🎬 <b>Дедлайны на 2 недели</b>\n' + lines.join('\n') : 'На ближайшие 2 недели дедлайнов нет 🎉');
   }
   if (cmd === '/money') {
-    const snap = await kvGet(env, 'snapshot'), base = await kvGet(env, 'baseline');
+    const snap = await freshSnapshot(env), base = await kvGet(env, 'baseline');
     return send(env, chat, snap ? '💰 <b>До монетизации</b>\n' + moneyLines(snap, base?.subs ?? snap.subs).join('\n') : 'Планер ещё не прислал данные.');
   }
   if (cmd === '/help' || cmd === '/start') return send(env, chat, HELP);

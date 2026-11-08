@@ -551,7 +551,7 @@ a.pill{color:var(--text)}
 <div class="toast" id="toast"></div>
 <script id="planner-data" type="application/json">null</script>
 <script>
-const APP_VERSION = 13; // запускатор сравнивает с версией файла на диске и предлагает обновить страницу
+const APP_VERSION = 15; // запускатор сравнивает с версией файла на диске и предлагает обновить страницу
 
 /* ================= утилиты ================= */
 const $ = (s, r = document) => r.querySelector(s);
@@ -790,6 +790,82 @@ function applyImagePaths(replaced, sent) {
   }
 }
 
+/* ----- слияние правок: открытый планер + Claude (через MCP) или другое устройство ----- */
+// Трёхстороннее: base — данные на момент последней синхронизации. С каждой стороны берём то, что там действительно поменялось;
+// если одно и то же поле поменяли обе стороны — побеждает правка в этом браузере.
+let serverRev = null, syncBase = null, pendingView = false;
+const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const pick3 = (l, r, b) => sameJson(l, b) ? r : l;
+function mergeFields(l, r, b) {
+  const out = {};
+  for (const k of new Set([...Object.keys(l || {}), ...Object.keys(r || {})])) out[k] = pick3(l?.[k], r?.[k], b?.[k]);
+  return out;
+}
+function mergeList(L = [], R = [], B = [], mergeItem, addedFirst) {
+  const byR = new Map(R.map(x => [x.id, x])), byB = new Map(B.map(x => [x.id, x])), mine = new Set(L.map(x => x.id)), out = [];
+  for (const l of L) {
+    const r = byR.get(l.id), b = byB.get(l.id);
+    if (!r) { if (!(b && sameJson(l, b))) out.push(l); continue; } // там удалили, а здесь не трогали — удаляем и здесь
+    out.push(b ? mergeItem(l, r, b) : l);
+  }
+  const added = R.filter(r => !mine.has(r.id) && !byB.has(r.id)); // новое оттуда, которое здесь не удаляли
+  return addedFirst ? [...added, ...out] : [...out, ...added];
+}
+function mergeStates(local, remote, base) {
+  const out = mergeFields(local, remote, base);
+  out.videos = mergeList(local.videos, remote.videos, base?.videos, (l, r, b) => {
+    const v = mergeFields(l, r, b);
+    v.stages = mergeList(l.stages, r.stages, b.stages, mergeFields, false);
+    v.updatedAt = Math.max(l.updatedAt || 0, r.updatedAt || 0);
+    return v;
+  }, true);
+  // конкурент: менялся только с одной стороны — берём эту сторону (облако само обновляет цифры раз в 6 часов); с обеих — более свежий
+  const fresh = c => Math.max(c.fetchedAt || 0, c.snapAt || 0);
+  out.competitors = mergeList(local.competitors, remote.competitors, base?.competitors,
+    (l, r, b) => sameJson(l, b) ? r : sameJson(r, b) ? l : fresh(r) > fresh(l) ? r : l, false);
+  out.channel = mergeFields(local.channel, remote.channel, base?.channel);
+  out.updatedAt = Date.now();
+  return out;
+}
+const cloneNormalized = data => normalize(JSON.parse(JSON.stringify(data)));
+// Перерисовать после чужих изменений, но не посреди ввода — тогда после того, как человек уйдёт из поля
+function applyRemoteView() {
+  const a = document.activeElement;
+  if (a?.isContentEditable || (app.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) || aiBusy || $('#aiPaste:not([hidden])')) { pendingView = true; return; }
+  pendingView = false;
+  rerender();
+  renderTopAvatar();
+}
+document.addEventListener('focusout', () => setTimeout(() => { if (pendingView) applyRemoteView(); }, 100));
+// Сохранение наткнулось на чужие правки: сливаем и сохраняем ещё раз
+function absorbRemote(remoteData, rev) {
+  const remote = cloneNormalized(remoteData);
+  state = normalize(mergeStates(state, remote, syncBase));
+  syncBase = remote;
+  serverRev = rev;
+  dirty = true;
+  applyRemoteView();
+}
+// Раз в 20 секунд: не записал ли что-то Claude или другое устройство
+async function pollRemote() {
+  if (!cloudMode || !canAutoFile || saving || document.hidden || serverRev == null) return;
+  try {
+    const {rev} = await (await fetch('/api/rev', {headers: {'x-planer': '1'}, cache: 'no-store'})).json();
+    if (rev == null || rev === serverRev) return;
+    if (dirty) return saveToFile(false); // есть свои несохранённые правки — сохранение само сольёт
+    const d = await (await fetch('/api/data', {headers: {'x-planer': '1'}, cache: 'no-store'})).json();
+    if (saving || dirty || !d.data) return; // пока загружали, человек что-то поменял — сольётся при сохранении
+    state = normalize(d.data);
+    syncBase = cloneNormalized(d.data);
+    serverRev = d.rev;
+    idbSet(DB_KEY, state);
+    applyRemoteView();
+    toast('🔄 Планер обновился — изменения из Claude или с другого устройства', 4000);
+  } catch (e) {}
+}
+setInterval(pollRemote, 20e3);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) pollRemote(); });
+
 async function saveToFile(interactive) {
   if (!canAutoFile) {
     if (interactive) toast('Данные не прочитались с диска — сохранение выключено, чтобы ничего не затереть. Перезапусти планер.', 8000);
@@ -799,11 +875,15 @@ async function saveToFile(interactive) {
   saving = true;
   const ver = state.updatedAt, sent = pendingImages();
   try {
-    const r = await fetch('/api/data', {method: 'PUT', headers: {'x-planer': '1', 'content-type': 'application/json'}, body: JSON.stringify(state)});
+    const body = JSON.stringify(state), headers = {'x-planer': '1', 'content-type': 'application/json'};
+    if (cloudMode && serverRev != null) headers['x-planer-rev'] = String(serverRev);
+    const r = await fetch('/api/data', {method: 'PUT', headers, body});
     const d = await r.json().catch(() => ({}));
+    if (r.status === 409 && cloudMode && d.data) { absorbRemote(d.data, d.rev); saveAgain = true; return; }
     if (r.status === 401 && cloudMode) { toast('Вход истёк — открываю страницу входа. Изменения сохранены в браузере и запишутся после входа.', 8000); setTimeout(() => location.reload(), 2500); return; }
     if (!r.ok) throw new Error(d.error?.message || 'ошибка ' + r.status);
     applyImagePaths(d.replaced, sent);
+    if (d.rev != null) { serverRev = d.rev; syncBase = cloneNormalized(JSON.parse(body)); }
     checkAppVersion(d.appVersion);
     if (state.updatedAt === ver) dirty = false;
     idbSet(DB_KEY, state);
@@ -1914,7 +1994,25 @@ const sum = (arr, k) => arr.reduce((s, x) => s + (Number(x[k]) || 0), 0);
 const pct = x => (x * 100).toFixed(1).replace('.', ',') + '%';
 const mk = (tag, text) => Object.assign(document.createElement(tag), {textContent: text});
 let gAuth = {token: '', exp: 0};
-const googleConnected = () => !!gAuth.token && Date.now() < gAuth.exp - 60e3;
+// В облаке Google подключается к самому облаку один раз (ключ хранится там) — тогда аналитику обновляет сервер, и сама раз в день
+let cloudGoogle = null;
+async function fetchCloudGoogle() {
+  if (!cloudMode) return null;
+  try { cloudGoogle = await (await fetch('/api/google/status', {headers: {'x-planer': '1'}, cache: 'no-store'})).json(); } catch (e) {}
+  return cloudGoogle;
+}
+const serverAnalytics = () => cloudMode && !!cloudGoogle?.connected;
+const googleConnected = () => serverAnalytics() || (!!gAuth.token && Date.now() < gAuth.exp - 60e3);
+async function serverAnalyticsCall(path, body) {
+  const r = await fetch(path, {method: 'POST', headers: {'x-planer': '1', 'content-type': 'application/json'}, body: JSON.stringify(body)});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    if (/заново|отозвал/.test(d.error?.message || '')) fetchCloudGoogle().then(() => { if (ui.tab === 'analytics') renderTab(); });
+    throw new Error(d.error?.message || 'ошибка ' + r.status);
+  }
+  await pollRemote(); // сервер записал данные в планер — подтягиваем их
+  return d;
+}
 
 function loadGis() {
   if (window.google?.accounts?.oauth2) return Promise.resolve();
@@ -2060,6 +2158,19 @@ function reachFor(days) {
 
 async function loadAnalytics(btn) {
   const days = ui.anPeriod || 28;
+  if (cloudMode && cloudGoogle?.configured && !cloudGoogle.connected) { location.href = '/google/connect'; return; }
+  if (serverAnalytics()) {
+    busy(btn, true, '⏳ Загружаю…');
+    document.querySelectorAll('#tabBody .box').forEach(b => b.classList.add('loading'));
+    try {
+      const d = await serverAnalyticsCall('/api/analytics/refresh', {days});
+      toast(d.errors?.length ? '✓ Обновлено, но не всё: ' + d.errors.join(' · ') : d.reach?.created
+        ? '✓ Готово. Отчёт с CTR заказан у YouTube — первые данные появятся через 1–2 дня' : '✓ Аналитика обновлена', d.errors?.length ? 9000 : 4000);
+    } catch (e) { toast(e.message, 9000); }
+    busy(btn, false);
+    if (ui.tab === 'analytics' && !getVideo()) renderTab();
+    return;
+  }
   try { await googleToken(true); } // откроет окно входа Google, если нужно
   catch (e) { return toast(e.message, 7000); }
   busy(btn, true, '⏳ Загружаю…');
@@ -2205,7 +2316,7 @@ const GOOD_UP = ['views', 'perDay', 'likes1k', 'comments1k', 'ctr', 'avgPct', 'a
 function videoTableHtml(days) {
   const an = state.analytics?.days === days ? state.analytics : null, reach = reachFor(days);
   const rows = state.videos.filter(v => v.yt).map(v => {
-    const y = v.yt, a = an?.videos[y.id], rc = reach.videos[y.id];
+    const y = v.yt, a = an?.videos?.[y.id], rc = reach.videos[y.id];
     return {v, title: v.title || y.title, published: Date.parse(y.publishedAt) || 0, views: y.views, perDay: y.views / Math.max(1, daysSince(v)),
       likes1k: y.views ? y.likes / y.views * 1000 : 0, comments1k: y.views ? y.comments / y.views * 1000 : 0,
       impr: rc ? rc.impr : null, ctr: rc ? rc.ctr : null, avgPct: a ? a.avgPct : null, avgDur: a ? a.avgDur : null, subs: a ? a.subs : null, periodViews: a ? a.views : null};
@@ -2274,6 +2385,16 @@ async function fetchVideoAnalytics(v, days) {
 
 async function loadVideoAnalytics(v, btn) {
   autoLoaded.add(v.id + ':' + (ui.anPeriod || 28));
+  if (cloudMode && cloudGoogle?.configured && !cloudGoogle.connected) { if (btn) location.href = '/google/connect'; return; }
+  if (serverAnalytics()) {
+    busy(btn, true, '⏳ Загружаю…');
+    document.querySelectorAll('#tabBody .box').forEach(b => b.classList.add('loading'));
+    try { await serverAnalyticsCall('/api/analytics/video', {id: v.id, days: ui.anPeriod || 28}); toast('✓ Статистика видео обновлена'); }
+    catch (e) { toast(e.message, 8000); }
+    busy(btn, false);
+    if (ui.anVideo === v.id && !getVideo()) renderTab();
+    return;
+  }
   try { await googleToken(true); }
   catch (e) { return toast(e.message, 7000); }
   busy(btn, true, '⏳ Загружаю…');
@@ -2314,7 +2435,7 @@ function renderVideoAnalytics(body, v) {
       ${AN_PERIODS.map(([d, t]) => `<button class="chip ${days === d ? 'active' : ''}" data-act="anperiod" data-days="${d}">${t}</button>`).join('')}
       <span style="flex:1"></span>
       <button class="pill" data-act="ytone" data-id="${v.id}">🔄 Просмотры и лайки</button>
-      <button class="pill ${connected ? '' : 'white'}" data-act="anvload" data-id="${v.id}">${connected ? '🔄 Удержание и трафик' : '🔐 Подключить Google'}</button>
+      <button class="pill ${connected ? '' : 'white'}" data-act="anvload" data-id="${v.id}">${connected ? '🔄 Удержание и трафик' : cloudGoogle?.configured ? '🔗 Подключить Google навсегда' : '🔐 Подключить Google'}</button>
     </div>
     <div class="va-head">
       <div class="mini" style="${v.thumb ? `background-image:url('${v.thumb}')` : `background:${grad(v.id)}`}"></div>
@@ -2358,19 +2479,25 @@ function drawVideoCharts(v) {
 function renderAnalytics(body) {
   const one = ui.anVideo && state.videos.find(v => v.id === ui.anVideo);
   if (one) return renderVideoAnalytics(body, one);
-  const days = ui.anPeriod || 28, an = state.analytics, connected = googleConnected();
-  if (serverMode && secrets.oauthClientId) loadGis().catch(() => {}); // заранее, чтобы окно входа не блокировалось
+  const days = ui.anPeriod || 28, an = state.analytics, connected = googleConnected(), g = cloudGoogle;
+  if (cloudMode && !g) fetchCloudGoogle().then(() => { if (ui.tab === 'analytics' && !getVideo()) renderTab(); });
+  if (serverMode && secrets.oauthClientId && !serverAnalytics()) loadGis().catch(() => {}); // заранее, чтобы окно входа не блокировалось
+  const googleLine = cloudMode && g?.configured
+    ? g.connected ? `Google подключён к облаку${g.email ? ': ' + esc(g.email) : ''} · аналитика обновляется сама раз в день <button class="link-btn" data-act="gdisconnect">отключить</button>`
+      : g.broken ? `<span class="late">Доступ Google пропал: ${esc(g.error)}</span> <button class="link-btn" data-act="gconnect">подключить заново</button>`
+      : 'Google не подключён к облаку — подключи один раз, и аналитика будет обновляться сама'
+    : `Google-аккаунт`;
   body.innerHTML = `
     <div class="an-bar">
       ${AN_PERIODS.map(([d, t]) => `<button class="chip ${days === d ? 'active' : ''}" data-act="anperiod" data-days="${d}">${t}</button>`).join('')}
       <span style="flex:1"></span>
       <button class="pill" data-act="ytsync">🔄 Статистика YouTube</button>
-      <button class="pill ${connected ? '' : 'white'}" data-act="anload">${connected ? '🔄 Обновить CTR и удержание' : '🔐 Подключить Google'}</button>
+      <button class="pill ${connected ? '' : 'white'}" data-act="anload">${connected ? '🔄 Обновить CTR и удержание' : g?.configured ? '🔗 Подключить Google навсегда' : '🔐 Подключить Google'}</button>
     </div>
     <div class="an-conn">
       <span><i class="dot ${secrets.ytKey ? 'on' : ''}"></i>Ключ YouTube API</span>
-      <span><i class="dot ${serverMode ? 'on' : ''}"></i>${serverMode ? 'Запущено через запускатор' : 'Открыто как файл: CTR и ChatGPT недоступны'}</span>
-      <span><i class="dot ${connected ? 'on' : ''}"></i>Google-аккаунт${an ? ` · данные от ${new Date(an.fetchedAt).toLocaleString('ru-RU', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'})}` : ''}</span>
+      <span><i class="dot ${serverMode ? 'on' : ''}"></i>${cloudMode ? 'Облачный планер' : serverMode ? 'Запущено через запускатор' : 'Открыто как файл: CTR и ChatGPT недоступны'}</span>
+      <span><i class="dot ${connected ? 'on' : ''}"></i>${googleLine}${an?.fetchedAt ? ` · данные от ${new Date(an.fetchedAt).toLocaleString('ru-RU', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'})}` : ''}</span>
     </div>
     ${kpiHtml(days)}
     ${chartsHtml(days)}
@@ -3923,6 +4050,11 @@ document.addEventListener('click', async e => {
     case 'anvideo': location.hash = '#/analytics/' + el.dataset.id; break;
     case 'anvload': loadVideoAnalytics(state.videos.find(x => x.id === el.dataset.id), el); break;
     case 'anload': loadAnalytics(el); break;
+    case 'gconnect': location.href = '/google/connect'; break;
+    case 'gdisconnect':
+      if (!confirm('Отключить облако от Google? Аналитика перестанет обновляться сама, пока не подключишь снова.')) break;
+      fetch('/api/google/disconnect', {method: 'POST', headers: {'x-planer': '1'}}).then(fetchCloudGoogle).then(() => { renderTab(); toast('Google отключён'); });
+      break;
     case 'ansort': {
       const k = el.dataset.key, cur = ui.anSort || {key: 'published', dir: -1};
       ui.anSort = {key: k, dir: cur.key === k ? -cur.dir : k === 'title' ? 1 : -1};
@@ -4263,6 +4395,7 @@ async function init() {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error?.message || 'ошибка ' + r.status);
     remote = d.data;
+    serverRev = d.rev ?? null;
     legacy = !!d.legacy;
     loaded = true;
   } catch (e) {
@@ -4270,7 +4403,8 @@ async function init() {
   }
   const cached = await idbGet(DB_KEY);
   if (cached && (!remote || (cached.updatedAt || 0) > (remote.updatedAt || 0))) {
-    state = normalize(cached); // в браузере остались изменения, которые не успели записаться
+    // в браузере остались изменения, которые не успели записаться; в облаке к ним добавляем то, что появилось там (идеи из Claude и т. п.)
+    state = normalize(cloudMode && remote ? mergeStates(normalize(cached), normalize(remote), {}) : cached);
     dirty = true;
   } else if (remote) {
     state = normalize(remote);
@@ -4280,6 +4414,7 @@ async function init() {
     dirty = true;
   }
   canAutoFile = loaded;
+  syncBase = remote ? cloneNormalized(remote) : null;
   renderTopAvatar();
   updateStatus();
   route();
@@ -4289,6 +4424,7 @@ async function init() {
   tgPush(false);
   tgPullIdeas();
   repairImages();
+  if (cloudMode) fetchCloudGoogle();
 }
 init();
 setInterval(() => { if (state) tgPullIdeas(); }, 2 * 60e3); // идеи, присланные боту
