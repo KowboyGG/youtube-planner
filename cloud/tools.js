@@ -15,7 +15,7 @@ const READ_WEB = {...READ, openWorldHint: true};
 const obj = (properties, required = []) => ({type: 'object', properties, required, additionalProperties: false});
 const KIND = {type: 'string', enum: ['all', 'video', 'short'], description: 'all — всё; video — обычные видео; short — Shorts'};
 
-const TRAFFIC_RU = {YT_SEARCH: 'поиск YouTube', RELATED_VIDEO: 'рекомендуемые', BROWSE: 'главная и лента', SUBSCRIBER: 'подписки', CHANNEL: 'страница канала',
+const TRAFFIC_RU = {YT_SEARCH: 'поиск YouTube', RELATED_VIDEO: 'рекомендуемые', BROWSE: 'главная и лента', SUBSCRIBER: 'главная, лента подписок и другие ленты', CHANNEL: 'страница канала',
   YT_CHANNEL: 'страница канала', EXT_URL: 'внешние сайты', NO_LINK_OTHER: 'прямые и другое', PLAYLIST: 'плейлисты', NOTIFICATION: 'уведомления',
   END_SCREEN: 'конечные заставки', SHORTS: 'лента Shorts', YT_OTHER_PAGE: 'другие страницы YouTube', HASHTAGS: 'хэштеги', ADVERTISING: 'реклама'};
 const PLAYBACK_RU = {WATCH: 'страница просмотра', EMBEDDED: 'встроенный плеер на сайтах', CHANNEL: 'страница канала', BROWSE: 'главная и лента',
