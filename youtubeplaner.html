@@ -350,15 +350,22 @@ a.pill{color:var(--text)}
 .va-head .mini{width:192px;aspect-ratio:16/9;border-radius:10px;flex:none;background:var(--bg3) center/cover no-repeat}
 .va-head h2{margin:0 0 4px;font-size:20px;word-break:break-word}
 .va-head .ch-actions{margin-top:10px}
-.tr-list{display:grid;gap:10px}
-.tr-row{display:grid;grid-template-columns:minmax(120px,210px) 1fr auto;align-items:center;gap:12px;font-size:13px}
+.tr-list{display:grid;gap:10px 12px;grid-template-columns:minmax(120px,210px) 1fr auto}
+/* строки — подсетка списка: полоски всех строк начинаются с одного места */
+.tr-row{grid-column:1 / -1;display:grid;grid-template-columns:subgrid;align-items:center;font-size:13px}
 .tr-track{height:10px}
 .tr-track i{display:block;height:100%;background:#3987e5;border-radius:0 4px 4px 0}
-.tr-val{color:var(--text2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.tr-val{color:var(--text2);font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
+.tr-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tr-list.wide{grid-template-columns:minmax(0,1.5fr) minmax(60px,1fr) auto}
+.deep-grid .tr-list{grid-template-columns:minmax(70px,auto) minmax(60px,1fr) auto}
+.tag-own{font-size:11px;padding:1px 6px;border-radius:6px;background:var(--bg3);color:var(--text2);margin-left:4px}
+.deep-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px 32px}
+.deep-grid h4{margin:0 0 10px;font-size:13px;font-weight:600;color:var(--text2)}
 @media (max-width:700px){
   .va-head{flex-direction:column;align-items:flex-start}
   .va-head .mini{width:100%}
-  .tr-row{grid-template-columns:1fr auto}
+  .tr-list,.tr-list.wide,.deep-grid .tr-list{grid-template-columns:minmax(0,1fr) auto}
   .tr-track{grid-column:1 / -1;order:3}
 }
 
@@ -551,7 +558,7 @@ a.pill{color:var(--text)}
 <div class="toast" id="toast"></div>
 <script id="planner-data" type="application/json">null</script>
 <script>
-const APP_VERSION = 15; // запускатор сравнивает с версией файла на диске и предлагает обновить страницу
+const APP_VERSION = 16; // запускатор сравнивает с версией файла на диске и предлагает обновить страницу
 
 /* ================= утилиты ================= */
 const $ = (s, r = document) => r.querySelector(s);
@@ -1773,6 +1780,9 @@ function videoPrompt(v, comments, question) {
       L.push(`Удержание (доля зрителей в этот момент видео): 10% — ${at(0.1)}, 25% — ${at(0.25)}, 50% — ${at(0.5)}, 75% — ${at(0.75)}, конец — ${at(1)}.`);
     }
     if (va?.traffic?.length) L.push('Источники трафика: ' + va.traffic.slice(0, 6).map(([t, n]) => `${TRAFFIC[t] || t} — ${n}`).join(', ') + '.');
+    const dp = va?.deep, rel = (dp?.related || []).filter(r => r[0] !== y.id);
+    if (rel.length) L.push('Видео, рядом с которыми YouTube рекомендовал этот ролик (просмотров оттуда): ' + rel.slice(0, 8).map(r => `«${dp.titles[r[0]]?.[0] || r[0]}» — ${r[1]}`).join(', ') + '.');
+    if (dp?.search?.length) L.push('Поисковые запросы: ' + dp.search.slice(0, 10).map(r => `«${r[0]}» — ${r[1]}`).join(', ') + '.');
     if (y.title && y.title !== v.title) L.push('Название на YouTube: ' + y.title);
     if (y.tags?.length) L.push('Теги: ' + y.tags.join(', '));
     if (y.description) L.push('Описание на YouTube:', y.description);
@@ -2179,6 +2189,8 @@ async function loadAnalytics(btn) {
   let reachResult = 0;
   anProgress('⏳ Просмотры…');
   try { await fetchAnalytics(days); } catch (e) { errors.push(e.message); }
+  anProgress('⏳ Аудитория…');
+  try { const dp = await fetchDeep(days); if (state.analytics) state.analytics.deep = dp; } catch (e) { errors.push('Аудитория: ' + e.message); }
   anProgress('⏳ CTR…');
   try { reachResult = await fetchReach(); } catch (e) { errors.push('CTR: ' + e.message); }
   anProgress('⏳ Часы…');
@@ -2368,6 +2380,7 @@ async function fetchVideoAnalytics(v, days) {
   const end = isoPlus(todayIso(), -1), start = isoPlus(end, -(days - 1));
   const q = p => 'https://youtubeanalytics.googleapis.com/v2/reports?' +
     new URLSearchParams({ids: 'channel==MINE', startDate: start, endDate: end, filters: 'video==' + v.yt.id, ...p});
+  const deep = fetchDeep(days, v.yt.id).catch(() => null);
   const [totals, daily, retention, traffic] = await Promise.allSettled([
     gGet(q({metrics: 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,likes,comments,shares'})),
     gGet(q({metrics: 'views,estimatedMinutesWatched,subscribersGained', dimensions: 'day', sort: 'day'})),
@@ -2379,8 +2392,78 @@ async function fetchVideoAnalytics(v, days) {
   v.ytAnalytics = {days, start, end, fetchedAt: Date.now(), totals: rowsOf(totals)[0] || null,
     daily: rowsOf(daily).map(r => ({day: r.day, views: r.views, minutes: r.estimatedMinutesWatched, subs: r.subscribersGained})),
     retention: rowsOf(retention).map(r => [r.elapsedVideoTimeRatio, r.audienceWatchRatio]).sort((a, b) => a[0] - b[0]),
-    traffic: rowsOf(traffic).map(r => [r.insightTrafficSourceType, r.views])};
+    traffic: rowsOf(traffic).map(r => [r.insightTrafficSourceType, r.views]), deep: await deep};
   return [retention, traffic].filter(r => r.status === 'rejected').length;
+}
+
+/* ----- глубокая аналитика: какие видео приводят зрителей, запросы, где смотрят, аудитория ----- */
+// Тот же набор запросов делает облако (cloud/analytics.js): строки — сначала измерения, потом метрики
+const DEEP_QUERIES = {
+  related: {metrics: 'views,estimatedMinutesWatched', dimensions: 'insightTrafficSourceDetail', src: 'RELATED_VIDEO', sort: '-views', maxResults: '25'},
+  search: {metrics: 'views,estimatedMinutesWatched', dimensions: 'insightTrafficSourceDetail', src: 'YT_SEARCH', sort: '-views', maxResults: '25'},
+  playback: {metrics: 'views,estimatedMinutesWatched', dimensions: 'insightPlaybackLocationType', sort: '-views'},
+  countries: {metrics: 'views,estimatedMinutesWatched', dimensions: 'country', sort: '-views'},
+  ages: {metrics: 'viewerPercentage', dimensions: 'ageGroup,gender'},
+  devices: {metrics: 'views,estimatedMinutesWatched', dimensions: 'deviceType', sort: '-views'},
+  subscribed: {metrics: 'views,estimatedMinutesWatched,averageViewDuration', dimensions: 'subscribedStatus'}};
+async function fetchDeep(days, ytId) {
+  const end = isoPlus(todayIso(), -1), start = isoPlus(end, -(days - 1)), out = {days, start, end, fetchedAt: Date.now(), titles: {}}, errors = [];
+  await Promise.all(Object.entries(DEEP_QUERIES).map(async ([k, {src, ...q}]) => {
+    const filters = [ytId && 'video==' + ytId, src && 'insightTrafficSourceType==' + src].filter(Boolean).join(';');
+    try { out[k] = ((await gGet('https://youtubeanalytics.googleapis.com/v2/reports?' + new URLSearchParams({ids: 'channel==MINE', startDate: start, endDate: end, ...q, ...(filters && {filters})}))).rows || []).slice(0, 25); }
+    catch (e) { out[k] = []; errors.push(e); }
+  }));
+  if (errors.length === Object.keys(DEEP_QUERIES).length) throw errors[0];
+  if (errors.length) out.partial = true;
+  const ids = [...new Set(out.related.map(r => r[0]).filter(id => /^[\w-]{11}$/.test(id)))];
+  if (ids.length && secrets.ytKey) try {
+    for (const it of (await ytGet('videos', {part: 'snippet', id: ids.join(',')})).items || []) out.titles[it.id] = [it.snippet.title, it.snippet.channelTitle, it.snippet.channelId];
+  } catch (e) {} // без названий — покажем ссылки
+  return out;
+}
+const PLAYBACK = {WATCH: 'Страница просмотра', EMBEDDED: 'Плеер на других сайтах', CHANNEL: 'Страница канала', BROWSE: 'Главная и лента',
+  SEARCH: 'Выдача поиска', SHORTS: 'Лента Shorts', YT_OTHER: 'Другие страницы YouTube', EXTERNAL_APP: 'Другие приложения', MOBILE: 'Мобильное приложение'};
+const DEVICES = {DESKTOP: 'Компьютер', MOBILE: 'Телефон', TABLET: 'Планшет', TV: 'Телевизор', GAME_CONSOLE: 'Игровая приставка', UNKNOWN_PLATFORM: 'Неизвестно'};
+const GENDERS = {female: 'Женщины', male: 'Мужчины', user_specified: 'Другое'};
+let regionNames;
+const countryName = c => { try { return (regionNames ||= new Intl.DisplayNames(['ru'], {type: 'region'})).of(c) || c; } catch (e) { return c; } };
+const ageName = a => a.replace('age', '').replace(/-$/, '+').replace('-', '–');
+const sumPairs = (rows, i) => { const m = new Map(); for (const r of rows) m.set(r[i], (m.get(r[i]) || 0) + (Number(r[2]) || 0)); return [...m]; };
+// Полоски: rows — [подпись (HTML), число, приписка]. share — доля от суммы, val — свой формат числа
+function barRows(rows, {share = true, val, wide = false} = {}) {
+  const total = rows.reduce((s, r) => s + r[1], 0), max = Math.max(1, ...rows.map(r => r[1]));
+  return `<div class="tr-list${wide ? ' wide' : ''}">${rows.map(([label, n, extra]) => `<div class="tr-row"><span class="tr-label">${label}</span>
+    <div class="tr-track"><i style="width:${Math.max(n / max * 100, 1)}%"></i></div>
+    <span class="tr-val">${val ? val(n) : fullNum(n)}${share ? ' · ' + pct(total ? n / total : 0) : ''}${extra ? ' · ' + extra : ''}</span></div>`).join('')}</div>`;
+}
+function deepHtml(d, selfYt) {
+  if (!d) return '';
+  const own = new Map(state.videos.filter(v => v.yt?.id).map(v => [v.yt.id, v])), period = `${fmtDate(d.start)} — ${fmtDate(d.end)}`;
+  const rel = d.related.filter(r => r[0] !== selfYt);
+  let html = '';
+  if (rel.length) html += `<div class="box"><h3>Какие видео приводят зрителей</h3>
+    <div class="sub">рядом с этими роликами YouTube рекомендовал ${selfYt ? 'это видео' : 'твои видео'} · сколько просмотров пришло из рекомендаций под каждым · ${period}</div>
+    ${barRows(rel.map(([id, n]) => { const v = own.get(id), t = d.titles[id];
+      return [v ? `<a href="#/analytics/${v.id}">${esc(v.title || v.yt.title)}</a><span class="tag-own">твоё</span>`
+        : `<a href="https://youtu.be/${id}" target="_blank" rel="noopener">${esc(t?.[0] || 'Видео ' + id)}</a>${t ? ` <span class="muted">· ${esc(t[1])}</span>` : ''}`, n]; }), {share: false, wide: true})}</div>`;
+  if (d.search.length) html += `<div class="box"><h3>Поисковые запросы</h3><div class="sub">что вводили в поиске YouTube перед тем, как посмотреть · ${period}</div>
+    ${barRows(d.search.map(r => [esc(r[0]), r[1]]), {wide: true})}</div>`;
+  if (d.playback.length) html += `<div class="box"><h3>Где смотрят</h3><div class="sub">на какой странице или в каком плеере шёл просмотр · ${period}</div>
+    ${barRows(d.playback.map(r => [PLAYBACK[r[0]] || esc(r[0]), r[1]]))}</div>`;
+  const parts = [];
+  if (d.countries.length) parts.push(['Страны', barRows(d.countries.slice(0, 10).map(r => [esc(countryName(r[0])), r[1]]))]);
+  if (d.ages.length) {
+    const p = n => Math.round(n) + '%';
+    parts.push(['Возраст', barRows(sumPairs(d.ages, 0).sort((a, b) => a[0].localeCompare(b[0])).map(([a, n]) => [ageName(a), n]), {share: false, val: p})],
+      ['Пол', barRows(sumPairs(d.ages, 1).map(([g, n]) => [GENDERS[g] || esc(g), n]), {share: false, val: p})]);
+  }
+  if (d.devices.length) parts.push(['Устройства', barRows(d.devices.map(r => [DEVICES[r[0]] || esc(r[0]), r[1]]))]);
+  if (d.subscribed.length) parts.push(['Подписаны ли · просмотры и сколько в среднем смотрят', barRows(d.subscribed.map(r => [r[0] === 'SUBSCRIBED' ? 'Подписчики' : 'Не подписаны', r[1], fmtDur(Math.round(r[3]))]))]);
+  html += `<div class="box"><h3>Аудитория</h3><div class="sub">кто смотрит · по просмотрам за ${period}</div>
+    ${parts.length ? `<div class="deep-grid">${parts.map(([h, x]) => `<div><h4>${h}</h4>${x}</div>`).join('')}</div>`
+      : '<div class="an-note">YouTube не отдал страны, возраст и устройства — так бывает, когда зрителей пока мало.</div>'}
+    ${d.partial ? '<div class="an-note">Часть отчётов YouTube не отдал — попробуй обновить позже.</div>' : ''}</div>`;
+  return html;
 }
 
 async function loadVideoAnalytics(v, btn) {
@@ -2418,7 +2501,7 @@ function videoReachDaily(ytId, days) {
 function renderVideoAnalytics(body, v) {
   const days = ui.anPeriod || 28, y = v.yt, connected = googleConnected();
   const a = v.ytAnalytics?.days === days ? v.ytAnalytics : null, reach = reachFor(days).videos[y.id], reachDays = videoReachDaily(y.id, days);
-  if (connected && !a && !autoLoaded.has(v.id + ':' + days)) setTimeout(() => loadVideoAnalytics(v, null), 0);
+  if (connected && !a?.deep && !autoLoaded.has(v.id + ':' + days)) setTimeout(() => loadVideoAnalytics(v, null), 0);
   const tiles = [[fullNum(y.views), 'просмотры за всё время'], [fullNum(y.likes), 'лайки'], [fullNum(y.comments), 'комментарии'],
     [compact(Math.round(y.views / Math.max(1, daysSince(v)))), 'просмотров в день']];
   if (a?.totals) {
@@ -2456,6 +2539,7 @@ function renderVideoAnalytics(body, v) {
       ${a.traffic.map(([type, n]) => `<div class="tr-row"><span>${esc(TRAFFIC[type] || type)}</span>
         <div class="tr-track"><i style="width:${Math.max(trafficTotal ? n / trafficTotal * 100 : 0, 1)}%"></i></div>
         <span class="tr-val">${fullNum(n)} · ${pct(trafficTotal ? n / trafficTotal : 0)}</span></div>`).join('')}</div></div>` : ''}
+    ${deepHtml(a?.deep, y.id)}
     ${reachDays.length ? `<div class="box"><h3>Показы превью и CTR по дням</h3><div class="sub">YouTube отдаёт эти отчёты с задержкой 1–2 дня</div>
       <div class="an-table-wrap"><table class="an-table"><thead><tr><th>День</th><th>Показы</th><th>CTR</th></tr></thead>
       <tbody>${reachDays.slice().reverse().map(r => `<tr><td>${fmtDate(r.day)}</td><td>${fullNum(r.impr)}</td><td>${pct(r.ctr)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
@@ -2501,6 +2585,7 @@ function renderAnalytics(body) {
     </div>
     ${kpiHtml(days)}
     ${chartsHtml(days)}
+    ${an?.deep?.days === days ? deepHtml(an.deep) : connected && an?.days === days ? '<div class="an-note">Нажми «🔄 Обновить CTR и удержание» — появятся видео, которые приводят зрителей, поисковые запросы, где смотрят и аудитория.</div>' : ''}
     ${videoTableHtml(days)}
     ${aiBoxHtml('channel', state.ai, false)}`;
   drawCharts();

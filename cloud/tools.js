@@ -18,6 +18,42 @@ const KIND = {type: 'string', enum: ['all', 'video', 'short'], description: 'all
 const TRAFFIC_RU = {YT_SEARCH: 'поиск YouTube', RELATED_VIDEO: 'рекомендуемые', BROWSE: 'главная и лента', SUBSCRIBER: 'подписки', CHANNEL: 'страница канала',
   YT_CHANNEL: 'страница канала', EXT_URL: 'внешние сайты', NO_LINK_OTHER: 'прямые и другое', PLAYLIST: 'плейлисты', NOTIFICATION: 'уведомления',
   END_SCREEN: 'конечные заставки', SHORTS: 'лента Shorts', YT_OTHER_PAGE: 'другие страницы YouTube', HASHTAGS: 'хэштеги', ADVERTISING: 'реклама'};
+const PLAYBACK_RU = {WATCH: 'страница просмотра', EMBEDDED: 'встроенный плеер на сайтах', CHANNEL: 'страница канала', BROWSE: 'главная и лента',
+  SEARCH: 'выдача поиска', SHORTS: 'лента Shorts', YT_OTHER: 'другие страницы YouTube', EXTERNAL_APP: 'другие приложения', MOBILE: 'мобильное приложение'};
+const DEVICE_RU = {DESKTOP: 'компьютер', MOBILE: 'телефон', TABLET: 'планшет', TV: 'телевизор', GAME_CONSOLE: 'приставка', UNKNOWN_PLATFORM: 'неизвестно'};
+const GENDER_RU = {female: 'женщины', male: 'мужчины', user_specified: 'другое'};
+let regions;
+const countryRu = c => { try { return (regions ||= new Intl.DisplayNames(['ru'], {type: 'region'})).of(c) || c; } catch (e) { return c; } };
+const share = (rows, i = 1) => { const t = rows.reduce((a, r) => a + (Number(r[i]) || 0), 0); return r => t ? Math.round(r[i] / t * 100) + '%' : '—'; };
+const sumBy = (rows, key, val) => { const m = new Map(); for (const r of rows) m.set(key(r), (m.get(key(r)) || 0) + (Number(val(r)) || 0)); return [...m]; };
+// Глубокая аналитика (cloud/analytics.js → deepAnalytics) текстом для Claude
+function deepText(d, data, selfYt) {
+  if (!d) return [];
+  const L = [], mine = new Map(data.videos.filter(v => v.yt?.id).map(v => [v.yt.id, v]));
+  const rel = d.related.filter(r => r[0] !== selfYt);
+  if (rel.length) {
+    const foreign = rel.filter(r => !mine.has(r[0])).reduce((a, r) => a + r[1], 0), all = rel.reduce((a, r) => a + r[1], 0);
+    L.push('', `Видео, рядом с которыми YouTube рекомендовал ${selfYt ? 'этот ролик' : 'автора'} (топ ${rel.length}; просмотры у автора | часы; чужие дали ${Math.round(foreign / all * 100)}% этих просмотров):`,
+      ...rel.slice(0, 15).map(([id, n, m]) => { const v = mine.get(id), t = d.titles[id];
+        return `- ${v ? `своё [${v.id}] ${v.title || v.yt.title}` : t ? `«${t[0]}» — ${t[1]}` : 'видео'} youtu.be/${id} | ${num(n)} | ${num(m / 60)}`; }));
+  }
+  if (d.search.length) { const sh = share(d.search); L.push('', 'Поисковые запросы, по которым находят (просмотры, доля среди топа): ' + d.search.slice(0, 20).map(r => `«${r[0]}» ${num(r[1])} (${sh(r)})`).join(', ')); }
+  if (d.playback.length) { const sh = share(d.playback); L.push('', 'Где смотрят: ' + d.playback.map(r => `${PLAYBACK_RU[r[0]] || r[0]} ${sh(r)}`).join(', ')); }
+  const A = [];
+  if (d.countries.length) { const sh = share(d.countries); A.push('страны: ' + d.countries.slice(0, 10).map(r => `${countryRu(r[0])} ${sh(r)}`).join(', ')); }
+  if (d.ages.length) {
+    A.push('возраст: ' + sumBy(d.ages, r => r[0], r => r[2]).sort().map(([a, p]) => `${a.replace('age', '').replace(/-$/, '+').replace('-', '–')} ${Math.round(p)}%`).join(', '));
+    A.push('пол: ' + sumBy(d.ages, r => r[1], r => r[2]).map(([g, p]) => `${GENDER_RU[g] || g} ${Math.round(p)}%`).join(', '));
+  }
+  if (d.devices.length) { const sh = share(d.devices); A.push('устройства: ' + d.devices.map(r => `${DEVICE_RU[r[0]] || r[0]} ${sh(r)}`).join(', ')); }
+  if (d.subscribed.length) { const sh = share(d.subscribed);
+    A.push('подписаны ли: ' + d.subscribed.map(r => `${r[0] === 'SUBSCRIBED' ? 'подписчики' : 'не подписаны'} ${sh(r)} просмотров, смотрят в среднем ${fmtDur(r[3])}`).join('; ')); }
+  if (A.length) L.push('', 'Аудитория — ' + A.join('; '));
+  else L.push('', 'Аудитория: YouTube не отдал страны, возраст и устройства — так бывает, когда зрителей мало.');
+  if (d.partial) L.push('Часть отчётов YouTube не отдал.');
+  return L;
+}
+
 // CTR и показы из ежедневных отчётов, сохранённых в планере, — за последние days дней
 function reachFor(reach, days) {
   const out = {impr: 0, clicks: 0, ctr: 0, videos: {}}, from = P.isoPlus(P.todayIso(), -days);
@@ -405,12 +441,15 @@ export const TOOLS = [
     name: 'channel_analytics', title: 'Аналитика канала',
     description: 'Закрытая аналитика канала автора из YouTube Analytics за период: просмотры, часы, средний просмотр, подписчики, ' +
       'динамика (вторая половина периода против первой), лучшие дни, видео с досмотром, средним временем, подписками, CTR и показами превью, ' +
-      'источники трафика. Нужен Google, подключённый к облачному планеру. Лимит YouTube Data API не тратит.',
+      'источники трафика; какие видео (свои и чужие) приводят зрителей через «рекомендуемые», поисковые запросы, где смотрят, ' +
+      'аудитория: страны, возраст, пол, устройства, подписчики против неподписанных. Нужен Google, подключённый к облачному планеру. ' +
+      'Лимит YouTube Data API: 1 единица (названия рекомендующих видео).',
     inputSchema: obj({days: {type: 'integer', enum: [7, 28, 90, 365], description: 'Период, по умолчанию 28'},
       limit: {type: 'integer', minimum: 1, maximum: 50, description: 'Сколько видео показать, по умолчанию 15'}}),
     annotations: READ_WEB,
     async run({days = 28, limit = 15}, ctx) {
-      const [an, traffic, data] = await Promise.all([A.channelAnalytics(ctx.env, days), A.channelTraffic(ctx.env, days).catch(() => []), ctx.data()]);
+      const [an, traffic, deep, data] = await Promise.all([A.channelAnalytics(ctx.env, days), A.channelTraffic(ctx.env, days).catch(() => []),
+        A.deepAnalytics(ctx.env, days).catch(() => null), ctx.data()]);
       const s = (rows, k) => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0), views = s(an.daily, 'views'), minutes = s(an.daily, 'minutes');
       const half = Math.floor(an.daily.length / 2), a1 = an.daily.slice(0, half), a2 = an.daily.slice(half);
       const change = (k) => { const x = s(a1, k), y = s(a2, k); return x ? `${y >= x ? '+' : ''}${Math.round((y - x) / x * 100)}%` : '—'; };
@@ -428,6 +467,7 @@ export const TOOLS = [
           (rc?.impr ? `${num(rc.impr)} | ${(rc.ctr * 100).toFixed(1).replace('.', ',')}%` : '— | —');
       }));
       if (traffic.length) { const t = traffic.reduce((a, r) => a + r.views, 0); L.push('', 'Источники трафика: ' + traffic.slice(0, 8).map(r => `${TRAFFIC_RU[r.insightTrafficSourceType] || r.insightTrafficSourceType} ${Math.round(r.views / t * 100)}%`).join(', ')); }
+      L.push(...deepText(deep, data));
       if (!reach.impr) L.push('', data.reach?.jobId ? 'CTR: отчёт заказан, данные появятся через 1–2 дня после заказа.' : 'CTR: отчёт ещё не заказан — автору нужно один раз нажать «Обновить CTR и удержание» в «Аналитике».');
       return L.join('\n');
     }
@@ -435,7 +475,8 @@ export const TOOLS = [
   {
     name: 'video_analytics', title: 'Аналитика видео',
     description: 'Закрытая аналитика одного видео автора: просмотры и часы за период, средний досмотр и время, подписки, лайки, репосты, ' +
-      'кривая удержания по точкам и три самых сильных провала зрителей с таймкодами (где переделать сценарий), источники трафика, CTR и показы превью. ' +
+      'кривая удержания по точкам и три самых сильных провала зрителей с таймкодами (где переделать сценарий), источники трафика, CTR и показы превью, ' +
+      'видео, после которых YouTube рекомендовал этот ролик, поисковые запросы, где смотрят, аудитория (страны, возраст, пол, устройства, подписаны ли). ' +
       'video — id из планера, ссылка или часть названия. Нужен Google, подключённый к облачному планеру.',
     inputSchema: obj({video: {type: 'string', minLength: 1}, days: {type: 'integer', enum: [7, 28, 90, 365], description: 'По умолчанию 28; для старых видео бери 365'}}, ['video']),
     annotations: READ_WEB,
@@ -465,7 +506,8 @@ export const TOOLS = [
         if (bumps.length) L.push('Пересматривают: ' + bumps.map(x => `${span(x)} +${Math.round(-x.d * 100)} п.п.`).join('; '));
       }
       if (a.traffic.length) { const tt = a.traffic.reduce((s, [, n]) => s + n, 0); L.push('Источники трафика: ' + a.traffic.slice(0, 8).map(([k, n]) => `${TRAFFIC_RU[k] || k} ${Math.round(n / tt * 100)}%`).join(', ')); }
-      if (a.daily.length) L.push('Просмотры по дням (последние 14): ' + a.daily.slice(-14).map(d => `${d.day.slice(5)} ${num(d.views)}`).join(', '));
+      L.push(...deepText(a.deep, data, v.yt.id));
+      if (a.daily.length) L.push('', 'Просмотры по дням (последние 14): ' + a.daily.slice(-14).map(d => `${d.day.slice(5)} ${num(d.views)}`).join(', '));
       return L.join('\n');
     }
   },
