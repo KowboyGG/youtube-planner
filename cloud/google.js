@@ -9,7 +9,10 @@ import {ToolError} from './mcp.js';
 export const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/yt-analytics.readonly openid email';
 const authUrl = env => env.GOOGLE_AUTH_URL || 'https://accounts.google.com/o/oauth2/v2/auth';
 const tokenUrl = env => env.GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token';
-export const googleConfigured = env => !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
+// Пробелы и переносы строк при копировании из Google Cloud убираем — с ними Google отвечает «OAuth client was not found»
+const clientId = env => String(env.GOOGLE_CLIENT_ID || '').replace(/\s+/g, '');
+const clientSecret = env => String(env.GOOGLE_CLIENT_SECRET || '').replace(/\s+/g, '');
+export const googleConfigured = env => !!(clientId(env) && clientSecret(env));
 
 /* ----- шифрование ключа обновления: ключ AES-GCM выводится из PLANER_SECRET ----- */
 async function aesKey(env) {
@@ -47,7 +50,7 @@ export async function googleAccessToken(env) {
   let r;
   try {
     r = await fetch(tokenUrl(env), {method: 'POST', signal: AbortSignal.timeout(15e3), headers: {'content-type': 'application/x-www-form-urlencoded'},
-      body: new URLSearchParams({grant_type: 'refresh_token', refresh_token: refresh, client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET})});
+      body: new URLSearchParams({grant_type: 'refresh_token', refresh_token: refresh, client_id: clientId(env), client_secret: clientSecret(env)})});
   } catch (e) { throw new ToolError('Google не ответил — попробуй ещё раз.'); }
   const d = await r.json().catch(() => ({}));
   if (!r.ok) {
@@ -88,9 +91,15 @@ export async function googleRoute(req, env, url, hasSession) {
     if (!hasSession) return Response.redirect(url.origin + '/', 302);
     if (!googleConfigured(env)) return page('Google', `<form><h1>${LOGO}Нужна настройка</h1><p>Добавь в настройках воркера Cloudflare секреты
       <b>GOOGLE_CLIENT_ID</b> и <b>GOOGLE_CLIENT_SECRET</b> (Google Cloud → Credentials → твой Web client).</p></form>`, 400);
+    const id = clientId(env);
+    if (!/^\d+-[a-z0-9]+\.apps\.googleusercontent\.com$/.test(id) && !env.GOOGLE_AUTH_URL)
+      return page('Google', `<form><h1>${LOGO}Client ID неполный</h1><p>В секрете <b>GOOGLE_CLIENT_ID</b> сейчас <code>${escHtml(id.length > 44 ? id.slice(0, 16) + '…' + id.slice(-26) : id || 'пусто')}</code>
+        (${id.length} знаков). Правильный — одной строкой вида <code>цифры-буквы.apps.googleusercontent.com</code>, около 72 знаков.</p>
+        <p>В Google Cloud → Credentials → Web client 1 нажми значок копирования рядом с Client ID и вставь заново в Cloudflare
+        (Settings → Variables and Secrets → карандаш у GOOGLE_CLIENT_ID).</p></form>`, 400);
     const exp = Date.now() + 15 * 60e3, nonce = randomToken(12), state = `${exp}.${nonce}.${await sign(env, 'google-state', exp + '.' + nonce)}`;
     const u = new URL(authUrl(env));
-    Object.entries({client_id: env.GOOGLE_CLIENT_ID, redirect_uri: redirectUri, response_type: 'code', scope: GOOGLE_SCOPES,
+    Object.entries({client_id: id, redirect_uri: redirectUri, response_type: 'code', scope: GOOGLE_SCOPES,
       access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state}).forEach(([k, v]) => u.searchParams.set(k, v));
     return Response.redirect(u.toString(), 302);
   }
@@ -102,7 +111,7 @@ export async function googleRoute(req, env, url, hasSession) {
     if (url.searchParams.get('error')) return fail(url.searchParams.get('error') === 'access_denied' ? 'Ты отменил вход в Google.' : 'Google: ' + escHtml(url.searchParams.get('error')));
     const r = await fetch(tokenUrl(env), {method: 'POST', headers: {'content-type': 'application/x-www-form-urlencoded'},
       body: new URLSearchParams({grant_type: 'authorization_code', code: url.searchParams.get('code') || '', redirect_uri: redirectUri,
-        client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET})});
+        client_id: clientId(env), client_secret: clientSecret(env)})});
     const d = await r.json().catch(() => ({}));
     if (!r.ok) return fail(d.error === 'redirect_uri_mismatch' ? `В Google Cloud у Web client добавь в «Authorized redirect URIs» адрес <b>${escHtml(redirectUri)}</b>.`
       : 'Google не выдал ключ: ' + escHtml(d.error_description || d.error || r.status));

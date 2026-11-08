@@ -9,7 +9,7 @@ export async function dailyAnalytics(env) {
   const last = await getJson(env, 'google:last-refresh');
   if (last && Date.now() - last.at < 20 * 3600e3) return 'уже свежая';
   try {
-    const r = await refreshAnalytics(env, 28);
+    const r = await refreshAnalytics(env, 28, {deep: false});
     return r.errors.length ? 'обновлена частично: ' + r.errors.join(' · ') : 'обновлена';
   } catch (e) {
     await putJson(env, 'google:last-refresh', {at: Date.now(), errors: [e.message]}); // не долбим Google каждый час, если что-то сломано

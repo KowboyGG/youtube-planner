@@ -1,7 +1,7 @@
 // YouTube Analytics и Reporting на сервере — те же запросы, что делает планер в браузере, и тот же формат данных,
 // чтобы вкладка «Аналитика» показывала их без изменений. Работает через постоянный доступ из cloud/google.js.
 import {googleAccessToken, googleGet} from './google.js';
-import {mutatePlaner, loadPlaner, todayIso, isoPlus} from './planer.js';
+import {mutatePlaner, loadPlaner, todayIso, isoPlus, yt} from './planer.js';
 import {putJson} from './store.js';
 import {ToolError} from './mcp.js';
 
@@ -17,6 +17,7 @@ export async function report(env, days, params) {
 // Просмотры по дням и статистика по видео за период — формат state.analytics
 export async function channelAnalytics(env, days) {
   const {start, end} = period(days);
+  await googleAccessToken(env); // один раз заранее, а не в каждом параллельном запросе
   const [daily, perVideo] = await Promise.all([
     report(env, days, {metrics: 'views,estimatedMinutesWatched,subscribersGained,subscribersLost', dimensions: 'day', sort: 'day'}),
     report(env, days, {metrics: 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained', dimensions: 'video', sort: '-views', maxResults: '200'})]);
@@ -39,6 +40,8 @@ export async function yppHours(env) {
 // Одно видео: итоги, просмотры по дням, удержание, источники трафика — формат video.ytAnalytics
 export async function videoAnalytics(env, ytId, days) {
   const {start, end} = period(days), f = {filters: 'video==' + ytId};
+  await googleAccessToken(env);
+  const deep = deepAnalytics(env, days, ytId).catch(() => null);
   const [totals, daily, retention, traffic] = await Promise.allSettled([
     report(env, days, {...f, metrics: 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,likes,comments,shares'}),
     report(env, days, {...f, metrics: 'views,estimatedMinutesWatched,subscribersGained', dimensions: 'day', sort: 'day'}),
@@ -49,7 +52,39 @@ export async function videoAnalytics(env, ytId, days) {
   return {days, start, end, fetchedAt: Date.now(), totals: ok(totals)[0] || null,
     daily: ok(daily).map(r => ({day: r.day, views: r.views, minutes: r.estimatedMinutesWatched, subs: r.subscribersGained})),
     retention: ok(retention).map(r => [r.elapsedVideoTimeRatio, r.audienceWatchRatio]).sort((a, b) => a[0] - b[0]),
-    traffic: ok(traffic).map(r => [r.insightTrafficSourceType, r.views])};
+    traffic: ok(traffic).map(r => [r.insightTrafficSourceType, r.views]), deep: await deep};
+}
+
+/* ----- глубокая аналитика: откуда именно приходят и кто смотрит ----- */
+// Тот же набор запросов делает планер в браузере (DEEP_QUERIES в youtubeplaner.html). Строки храним как отдаёт YouTube:
+// сначала измерения, потом метрики в порядке запроса. related — id видео, после которых YouTube рекомендовал ролик автора.
+export const DEEP_QUERIES = {
+  related: {metrics: 'views,estimatedMinutesWatched', dimensions: 'insightTrafficSourceDetail', src: 'RELATED_VIDEO', sort: '-views', maxResults: '25'},
+  search: {metrics: 'views,estimatedMinutesWatched', dimensions: 'insightTrafficSourceDetail', src: 'YT_SEARCH', sort: '-views', maxResults: '25'},
+  playback: {metrics: 'views,estimatedMinutesWatched', dimensions: 'insightPlaybackLocationType', sort: '-views'},
+  countries: {metrics: 'views,estimatedMinutesWatched', dimensions: 'country', sort: '-views'},
+  ages: {metrics: 'viewerPercentage', dimensions: 'ageGroup,gender'},
+  devices: {metrics: 'views,estimatedMinutesWatched', dimensions: 'deviceType', sort: '-views'},
+  subscribed: {metrics: 'views,estimatedMinutesWatched,averageViewDuration', dimensions: 'subscribedStatus'}};
+
+// Всего канала или одного видео (ytId). Названия и каналы рекомендующих видео — из YouTube Data API (1 единица лимита).
+export async function deepAnalytics(env, days, ytId) {
+  const {start, end} = period(days), out = {days, start, end, fetchedAt: Date.now(), titles: {}}, errors = [];
+  await googleAccessToken(env);
+  await Promise.all(Object.entries(DEEP_QUERIES).map(async ([k, {src, ...q}]) => {
+    const filters = [ytId && 'video==' + ytId, src && 'insightTrafficSourceType==' + src].filter(Boolean).join(';');
+    try {
+      const d = JSON.parse(await googleGet(env, YTA(env) + 'reports?' + new URLSearchParams({ids: 'channel==MINE', startDate: start, endDate: end, ...q, ...(filters && {filters})})));
+      out[k] = (d.rows || []).slice(0, 25);
+    } catch (e) { out[k] = []; errors.push(e); }
+  }));
+  if (errors.length === Object.keys(DEEP_QUERIES).length) throw errors[0];
+  if (errors.length) out.partial = true;
+  const ids = [...new Set(out.related.map(r => r[0]).filter(id => /^[\w-]{11}$/.test(id)))];
+  if (ids.length && env.YT_KEY) try {
+    for (const it of (await yt(env, 'videos', {part: 'snippet', id: ids.join(',')})).items || []) out.titles[it.id] = [it.snippet.title, it.snippet.channelTitle, it.snippet.channelId];
+  } catch (e) {} // без названий — покажем ссылки
+  return out;
 }
 
 // Источники трафика всего канала за период (только для Claude, в планере не храним)
@@ -111,16 +146,20 @@ export async function updateReach(env, reach) {
 }
 
 // Обновить всю аналитику канала в планере: просмотры по дням, часы для монетизации, CTR. Возвращает сводку и ошибки частей.
-export async function refreshAnalytics(env, days = 28) {
+// deep — заодно рекомендующие видео, запросы и аудитория (+8 запросов; ежедневная задача их пропускает, чтобы уложиться в лимит воркера)
+export async function refreshAnalytics(env, days = 28, {deep = true} = {}) {
   const errors = [];
-  const [an, ypp] = await Promise.all([channelAnalytics(env, days).catch(e => { errors.push(e.message); return null; }),
-    yppHours(env).catch(e => { errors.push('часы: ' + e.message); return null; })]);
-  if (!an && !ypp) throw new ToolError(errors[0].replace(/^часы: /, '')); // обе части упали — почти всегда по одной причине (доступ Google)
+  await googleAccessToken(env).catch(() => {}); // ошибку доступа покажут сами запросы
+  const [an, ypp, dp] = await Promise.all([channelAnalytics(env, days).catch(e => { errors.push(e.message); return null; }),
+    yppHours(env).catch(e => { errors.push('часы: ' + e.message); return null; }),
+    deep ? deepAnalytics(env, days).catch(e => { errors.push('аудитория: ' + e.message); return null; }) : null]);
+  if (!an && !ypp) throw new ToolError(errors[0].replace(/^(часы|аудитория): /, '')); // обе части упали — почти всегда по одной причине (доступ Google)
   // всё скачиваем заранее, а запись — быстрая: если в этот момент сохраняет открытый планер, повтор не будет заново ходить в Google
   let reachRes = null;
   try { reachRes = await updateReach(env, (await loadPlaner(env)).data?.reach); } catch (e) { errors.push('CTR: ' + e.message); }
   await mutatePlaner(env, data => {
-    if (an) data.analytics = an;
+    if (an) data.analytics = {...an, deep: dp || data.analytics?.deep || null};
+    else if (dp && data.analytics) data.analytics.deep = dp;
     if (ypp) data.ypp = ypp;
     if (reachRes) data.reach = reachRes.reach;
   });
