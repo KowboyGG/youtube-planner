@@ -77,7 +77,7 @@ export async function collectSnapshot(env, {force = false} = {}) {
       for (const it of items) {
         if (it.snippet.channelId !== r.id) continue;
         const v = known.get(it.id);
-        if (v) Object.assign(v, {views: +it.statistics?.viewCount || 0, likes: +it.statistics?.likeCount || 0, comments: +it.statistics?.commentCount || 0});
+        if (v) Object.assign(v, {title: it.snippet.title, views: +it.statistics?.viewCount || 0, likes: +it.statistics?.likeCount || 0, comments: +it.statistics?.commentCount || 0});
         else { r.videos.push(toRivalVideo(it)); added++; } // тип у нового ролика пока по длительности — планер уточнит при полном обновлении
       }
       r.videos.sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));

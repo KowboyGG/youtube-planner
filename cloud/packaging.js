@@ -70,7 +70,7 @@ export async function checkThumbs(env, limit = 20) {
   await fillBefore(env, fresh);
   await putJson(env, 'pkg', pkg);
   if (fresh.length) await putJson(env, 'pkg:events', events.slice(-EVENTS_KEEP));
-  return `превью: проверено ${checked}, смен ${fresh.length}`;
+  return `проверено ${checked}, смен ${fresh.length}`;
 }
 
 async function saveImage(env, h, bytes) {

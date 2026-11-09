@@ -10,6 +10,7 @@ import * as T from './timing.js';
 import * as CV from './curves.js';
 import * as PK from './packaging.js';
 import {getJson, db} from './store.js';
+import {googleStatus} from './google.js';
 
 const {num, x1, fmtDur, daysAgo, ytIdFrom} = P;
 const plural = (n, [one, few, many]) => { const a = n % 10, b = n % 100; return `${num(n)} ${a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many}`; };
@@ -637,7 +638,8 @@ export const TOOLS = [
         const bar = x => '█'.repeat(Math.round(x * 120)) || '·';
         L.push('', 'Доля просмотров по часам суток' + (obs.observed ? ` | наблюдения за ${plural(obs.days, ['день', 'дня', 'дней'])} (все видео, кроме первых трёх суток после выхода)` : '') +
           (eh ? ` | оценка по странам (покрыто ${Math.round(est.coverage * 100)}% просмотров)` : '') + ':');
-        for (let h = 0; h < 24; h++) L.push(`${String(h).padStart(2, '0')}:00 ` + [obs.observed ? `${(oh[h] * 100).toFixed(1).padStart(4)}% ${bar(oh[h])}` : '', eh ? `оценка ${(eh[h] * 100).toFixed(1)}%` : ''].filter(Boolean).join(' | '));
+        const pc = x => (x * 100).toFixed(1).replace('.', ',') + '%';
+        for (let h = 0; h < 24; h++) L.push(`${String(h).padStart(2, '0')}:00 ` + [obs.observed ? `${pc(oh[h])} ${bar(oh[h])}` : '', eh ? `оценка ${pc(eh[h])}` : ''].filter(Boolean).join(' | '));
       }
       if (obs.weekdays.some(x => x != null)) {
         const w = share(obs.weekdays);
@@ -707,7 +709,7 @@ export const TOOLS = [
         L.push('', vid ? 'Ролик против нормы:' : 'Свежие ролики против нормы:');
         for (const r of cmp) {
           const last = r.pts[r.pts.length - 1], age = last[0], norm = CV.normAt(list, age, r.id);
-          const marks = CV.AGES.filter(a => a <= age).map(a => { const v = CV.viewsAt(r.pts, a), m = CV.normAt(list, a, r.id).median; return v != null && m ? `${CV.AGE_RU[a]} ${x1(v / m)}` : null; }).filter(Boolean);
+          const marks = CV.AGES.filter(a => a <= age).map(a => { const v = CV.viewsAt(r.pts, a), m = CV.normAt(list, a, r.id).median; return v != null && m ? `${CV.AGE_SHORT[a]} ${x1(v / m)}` : null; }).filter(Boolean);
           L.push(`- «${clip(titles.get(r.id) || r.id, 60)}» youtu.be/${r.id}: ${age < 48 ? Math.round(age) + ' ч' : Math.round(age / 24) + ' дн.'} от выхода, ${num(last[1])} просм.` +
             (norm.median ? `; обычно к этому возрасту ${num(norm.median)} → ${x1(last[1] / norm.median)}` : '; нормы для такого возраста пока нет') +
             (marks.length ? ` (по вехам: ${marks.join(', ')})` : ''));
@@ -748,7 +750,7 @@ export const TOOLS = [
       const L = [head, ''];
       for (const e of list.slice(0, 40)) {
         const what = e.type === 'title' ? `название «${clip(e.from, 70)}» → «${clip(e.to, 70)}»` : `превью${e.back ? ' (вернули одно из прежних — похоже на A/B-тест превью)' : ''}`;
-        let line = `- ${when(e.t)} · ${chName(e.c)} · «${clip(titles.get(e.id) || (e.type === 'title' ? e.to : e.id), 60)}» youtu.be/${e.id} — ${what}`;
+        let line = `- ${when(e.t)} · ${chName(e.c)} · ${e.type === 'title' ? '' : `«${clip(titles.get(e.id) || e.id, 60)}» `}youtu.be/${e.id} — ${what}`;
         const before = e.vB ? vph(e.vB, [e.t, e.v0]) : null, after = e.vA ? vph([e.t, e.v0], e.vA) : null;
         if (after != null && before) {
           line += `; темп до ${num(before)}/ч, после ${num(after)}/ч: ${x1(after / before)}`;
@@ -777,6 +779,70 @@ export const TOOLS = [
       }
       if (content.length === 1) content.push({type: 'text', text: 'Смен превью у этого ролика нет — только названия.'});
       return {content};
+    }
+  },
+  {
+    name: 'discover_channels', title: 'Найти новых конкурентов',
+    description: 'Ищет каналы, которых ещё нет среди конкурентов: (1) рядом с чьими роликами YouTube рекомендует видео автора — из закрытой аналитики, ' +
+      'это самый точный сигнал общей аудитории (нужен Google в облаке); (2) какие каналы рекомендуют у себя на странице текущие конкуренты; ' +
+      '(3) по желанию — кто в топе поиска по реальным запросам, которыми находят автора (search: true, дорого — 100 единиц лимита за запрос). ' +
+      'Для каждого — подписчики, средние просмотры на видео и откуда сигнал. Добавить понравившиеся — add_competitor. Без search — ≈15 единиц лимита.',
+    inputSchema: obj({days: {type: 'integer', enum: [28, 90, 365], description: 'За какой период брать рекомендации, по умолчанию 90'},
+      search: {type: 'boolean', description: 'Ещё и поиск по 2 главным поисковым запросам (200 единиц лимита)'},
+      limit: {type: 'integer', minimum: 1, maximum: 40, description: 'По умолчанию 20'}}),
+    annotations: READ_WEB,
+    async run({days = 90, search = false, limit = 20}, ctx) {
+      const env = ctx.env, data = await ctx.data(), own = data.channel?.yt?.id;
+      const known = new Set([own, ...(data.competitors || []).map(c => c.id)].filter(Boolean));
+      const cand = new Map(), add = (id, f) => { if (!id || known.has(id)) return; const c = cand.get(id) || {id, rel: 0, relVideos: new Set(), featuredBy: new Set(), searchHits: 0}; f(c); cand.set(id, c); };
+      const notes = [];
+      // 1. рекомендуемые: по каналу целиком и по пяти последним своим длинным видео (у каждого запроса YouTube отдаёт до 25 строк)
+      const google = (await googleStatus(env)).connected;
+      if (google) {
+        const relQ = extra => A.report(env, days, {metrics: 'views', dimensions: 'insightTrafficSourceDetail', sort: '-views', maxResults: '25',
+          filters: ['insightTrafficSourceType==RELATED_VIDEO', extra].filter(Boolean).join(';')}).catch(() => []);
+        const recent = data.videos.filter(v => v.yt?.id && v.type !== 'short').sort((a, b) => Date.parse(b.yt.publishedAt) - Date.parse(a.yt.publishedAt)).slice(0, 5);
+        const rows = (await Promise.all([relQ(''), ...recent.map(v => relQ('video==' + v.yt.id))])).flat();
+        const byVideo = new Map();
+        for (const r of rows) byVideo.set(r.insightTrafficSourceDetail, Math.max(byVideo.get(r.insightTrafficSourceDetail) || 0, r.views));
+        const ids = [...byVideo.keys()].filter(id => /^[\w-]{11}$/.test(id));
+        for (const it of ids.length ? await ytVideos(env, ids, 'snippet') : [])
+          add(it.snippet.channelId, c => { c.rel += byVideo.get(it.id) || 0; c.relVideos.add(it.snippet.title); });
+      } else notes.push('Google не подключён к облаку — без самого точного сигнала (рекомендации рядом с чужими роликами).');
+      // 2. каналы, которые конкуренты рекомендуют у себя на странице
+      await Promise.all((data.competitors || []).slice(0, 20).map(async comp => {
+        try {
+          const d = await P.yt(env, 'channelSections', {part: 'contentDetails', channelId: comp.id});
+          for (const sec of d.items || []) for (const id of sec.contentDetails?.channels || []) add(id, c => c.featuredBy.add(comp.title));
+        } catch (e) {}
+      }));
+      // 3. поиск по главным запросам, которыми находят автора (дорого — только по просьбе)
+      if (search) {
+        let terms = [];
+        if (google) terms = (await A.report(env, days, {metrics: 'views', dimensions: 'insightTrafficSourceDetail', filters: 'insightTrafficSourceType==YT_SEARCH', sort: '-views', maxResults: '10'}).catch(() => []))
+          .map(r => r.insightTrafficSourceDetail).filter(Boolean).slice(0, 2);
+        if (!terms.length) notes.push('Поиск пропущен: нет поисковых запросов из аналитики.');
+        for (const q of terms) {
+          const d = await P.yt(env, 'search', {part: 'snippet', type: 'video', q, maxResults: 25, order: 'relevance'});
+          for (const it of d.items || []) add(it.snippet?.channelId, c => { c.searchHits++; (c.terms ||= new Set()).add(q); });
+        }
+      }
+      if (!cand.size) return ['Новых каналов не нашлось.', ...notes].join('\n');
+      const stats = new Map();
+      const ids = [...cand.keys()];
+      for (let i = 0; i < ids.length; i += 50)
+        for (const ch of (await P.yt(env, 'channels', {part: 'snippet,statistics', id: ids.slice(i, i + 50).join(',')})).items || []) stats.set(ch.id, ch);
+      const score = c => c.rel * 3 + c.featuredBy.size * 40 + c.searchHits * 15;
+      const list = [...cand.values()].filter(c => stats.has(c.id)).sort((a, b) => score(b) - score(a)).slice(0, limit);
+      const L = [`Кандидаты в конкуренты (${list.length} из ${cand.size}; самые сильные сигналы — сверху):`];
+      for (const c of list) {
+        const ch = stats.get(c.id), st = ch.statistics || {}, vids = +st.videoCount || 0, avg = vids ? +st.viewCount / vids : 0;
+        const why = [c.rel ? `YouTube показывал тебя рядом с ${plural(c.relVideos.size, ['его роликом', 'его роликами', 'его роликами'])} (${num(c.rel)} просм. к тебе): ${[...c.relVideos].slice(0, 2).map(t => '«' + clip(t, 50) + '»').join(', ')}` : '',
+          c.featuredBy.size ? `его рекомендует на своей странице ${[...c.featuredBy].join(', ')}` : '', c.searchHits ? `в топе поиска по «${[...c.terms].join('», «')}» (${c.searchHits} шт.)` : ''].filter(Boolean);
+        L.push(`- ${ch.snippet.title}${ch.snippet.customUrl ? ' (' + ch.snippet.customUrl + ')' : ''} [${c.id}] — ${st.hiddenSubscriberCount ? 'подписчики скрыты' : num(+st.subscriberCount) + ' подп.'}, ` +
+          `${plural(vids, VIDEOS)}, ≈${num(avg)} просм. на ролик. ${why.join('; ')}.`);
+      }
+      return [...L, ...(notes.length ? ['', ...notes] : []), '', 'Добавить в конкуренты — add_competitor с @ником или id.'].join('\n');
     }
   },
   /* ================= YouTube Analytics (нужен Google, подключённый к облаку) ================= */
