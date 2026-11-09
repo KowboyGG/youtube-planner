@@ -7,7 +7,8 @@ import {loadSnapshots, SNAP_EVERY} from './snapshots.js';
 import * as G from './gemini.js';
 import * as K from './knowledge.js';
 import * as T from './timing.js';
-import {db} from './store.js';
+import * as CV from './curves.js';
+import {getJson, db} from './store.js';
 
 const {num, x1, fmtDur, daysAgo, ytIdFrom} = P;
 const plural = (n, [one, few, many]) => { const a = n % 10, b = n % 100; return `${num(n)} ${a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many}`; };
@@ -658,6 +659,58 @@ export const TOOLS = [
         const peak = T.peakWindow(base), at = (peak + 22) % 24;
         L.push('', `Вывод (${enough ? 'по наблюдениям' : 'по оценке по странам'}): пик просмотров ${String(peak).padStart(2, '0')}:00–${String((peak + 3) % 24).padStart(2, '0')}:00. ` +
           `Публиковать стоит примерно в ${String(at).padStart(2, '0')}:00 — за 2 часа до пика: первые часы YouTube показывает ролик подписчикам и проверяет в рекомендациях.`);
+      }
+      return L.join('\n');
+    }
+  },
+  {
+    name: 'view_curve', title: 'Как набирают просмотры',
+    description: 'Как обычно набирают просмотры видео канала: медиана и разброс через 6 ч, сутки, 2 дня, неделю, 2 недели и месяц после выхода — ' +
+      'и как свежие ролики идут против этой нормы («через сутки 1 200, обычно 800 → ×1,5»). channel — mine (по умолчанию) или конкурент; ' +
+      'video — один ролик для сравнения. Данные копятся снимками облака (раз в 6 ч, свои — раз в час), поэтому нормы точнее с каждой неделей. Бесплатно.',
+    inputSchema: obj({channel: {type: 'string', description: 'mine — свой канал (по умолчанию) или конкурент: название, @ник или id'},
+      video: {type: 'string', description: 'Ролик для сравнения: ссылка, id YouTube или видео из планера'}, kind: {...KIND, enum: ['video', 'short'], description: 'video — длинные (по умолчанию), short — Shorts'}}),
+    annotations: READ,
+    async run({channel = 'mine', video, kind = 'video'}, ctx) {
+      const data = await ctx.data(), curves = await getJson(ctx.env, 'curves') || {}, short = kind === 'short';
+      let chId, chName, vid = video ? ytIdFrom(video) : '';
+      if (video && !vid) { const v = findMyVideo(data, video); vid = v.yt?.id; if (!vid) throw new ToolError(`«${v.title}» ещё не вышло.`); }
+      if (vid && curves[vid] && channel === 'mine' && curves[vid].c !== data.channel?.yt?.id) channel = curves[vid].c; // чужой ролик — норма его канала
+      if (channel === 'mine') { chId = data.channel?.yt?.id; chName = data.channel?.name || 'твой канал'; }
+      else { const c = (data.competitors || []).find(c => c.id === channel) || findCompetitor(data, channel); chId = c.id; chName = c.title; }
+      if (!chId) throw new ToolError('У канала в планере нет id YouTube — синхронизируй статистику в планере.');
+      let list = CV.channelCurves(curves, chId, short);
+      if (chId === data.channel?.yt?.id) { // свои — добавляем замеры, которые планер копил в браузере
+        const extra = {};
+        for (const r of list) extra[r.id] = {...r, pts: r.pts.slice()};
+        for (const v of data.videos) if (v.yt?.id && v.yt.publishedAt && (v.type === 'short') === short)
+          CV.addPoints(extra, (v.ytHistory || []).map(h => ({id: v.yt.id, c: chId, p: Date.parse(v.yt.publishedAt), t: h.t, views: h.views})));
+        list = Object.entries(extra).map(([id, r]) => ({...r, id}));
+      }
+      const titles = new Map([...data.videos.filter(v => v.yt?.id).map(v => [v.yt.id, v.title || v.yt.title]),
+        ...(data.competitors || []).flatMap(c => (c.videos || []).map(v => [v.id, v.title]))]);
+      const L = [`Набор просмотров — ${chName}, ${short ? 'Shorts' : 'длинные видео'}. Роликов с замерами: ${list.length}.`, '',
+        'Обычно (медиана; в скобках — половина роликов между этими значениями; сколько роликов в выборке):'];
+      let any = false;
+      for (const age of CV.AGES) {
+        const n = CV.normAt(list, age);
+        if (n.median != null) { any = true; L.push(`- через ${CV.AGE_RU[age]}: ${num(n.median)} (${num(n.p25)}–${num(n.p75)}; ${n.n})`); }
+        else L.push(`- через ${CV.AGE_RU[age]}: мало данных (${n.n} из 3 нужных)`);
+      }
+      if (!any) L.push('', 'Норм пока нет: облако снимает цифры с недавних пор, и для каждого возраста нужно хотя бы 3 ролика, которые облако застало до и после него. ' +
+        'Для суток и 2 дней — ролики, вышедшие уже после начала замеров; для недели и месяца данные появятся быстрее.');
+      // сравнение: один ролик или свежие ролики канала (до 30 дней)
+      const now = Date.now(), cmp = vid ? list.filter(r => r.id === vid) : list.filter(r => now - r.p < 30 * 864e5).sort((a, b) => b.p - a.p).slice(0, 8);
+      if (vid && !cmp.length) L.push('', 'Этого ролика нет в замерах облака: облако следит за роликами своего канала и конкурентов не старше 60 дней.');
+      if (cmp.length) {
+        L.push('', vid ? 'Ролик против нормы:' : 'Свежие ролики против нормы:');
+        for (const r of cmp) {
+          const last = r.pts[r.pts.length - 1], age = last[0], norm = CV.normAt(list, age, r.id);
+          const marks = CV.AGES.filter(a => a <= age).map(a => { const v = CV.viewsAt(r.pts, a), m = CV.normAt(list, a, r.id).median; return v != null && m ? `${CV.AGE_RU[a]} ${x1(v / m)}` : null; }).filter(Boolean);
+          L.push(`- «${clip(titles.get(r.id) || r.id, 60)}» youtu.be/${r.id}: ${age < 48 ? Math.round(age) + ' ч' : Math.round(age / 24) + ' дн.'} от выхода, ${num(last[1])} просм.` +
+            (norm.median ? `; обычно к этому возрасту ${num(norm.median)} → ${x1(last[1] / norm.median)}` : '; нормы для такого возраста пока нет') +
+            (marks.length ? ` (по вехам: ${marks.join(', ')})` : ''));
+        }
       }
       return L.join('\n');
     }

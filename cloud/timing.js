@@ -4,6 +4,7 @@
 import {yt, loadPlaner, xOf, kindOf} from './planer.js';
 import {getJson, putJson, put, removeOlder, db} from './store.js';
 import {googleStatus} from './google.js';
+import {updateCurves} from './curves.js';
 import {report} from './analytics.js';
 
 export const HOURLY_KEEP = 70 * 864e5;
@@ -23,6 +24,11 @@ export async function collectHourly(env) {
   await put(env, 'hr:' + new Date(snap.t).toISOString(), JSON.stringify(snap));
   await removeOlder(env, 'hr:2', HOURLY_KEEP);
   await putJson(env, 'hr:last', {at: snap.t});
+  const own = data.channel?.yt?.id;
+  try { // те же цифры — точные точки первых часов для «набора просмотров»
+    await updateCurves(env, data.videos.filter(v => v.yt?.id in snap.v && v.yt.publishedAt)
+      .map(v => ({id: v.yt.id, c: own, p: Date.parse(v.yt.publishedAt), t: snap.t, views: snap.v[v.yt.id], s: v.type === 'short'})));
+  } catch (e) { console.log('набор просмотров:', e.message); }
   return `просмотры ${Object.keys(snap.v).length} видео`;
 }
 
