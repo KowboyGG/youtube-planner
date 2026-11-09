@@ -8,6 +8,7 @@ import {hex, sign as signFor, sameText, tooManyFailures, countFailure, page, LOG
 import {db, getText, put} from './store.js';
 import {oauthRoute, checkAccess, unauthorized, CORS} from './oauth.js';
 import {handleMcp} from './mcp.js';
+import {knowledgeInstructions} from './knowledge.js';
 import {TOOLS, makeToolContext} from './tools.js';
 import {loadPlaner, writePlaner} from './planer.js';
 import {googleRoute, googleStatus, googleDisconnect} from './google.js';
@@ -186,7 +187,7 @@ export default {
     if (url.pathname === '/mcp') {
       const access = await checkAccess(req, env);
       if (!access.ok) return unauthorized(url.origin, access.invalid);
-      return handleMcp(req, {tools: TOOLS, makeContext: () => makeToolContext(env, ctx), cors: CORS});
+      return handleMcp(req, {tools: TOOLS, makeContext: () => makeToolContext(env, ctx), cors: CORS, instructions: knowledgeInstructions()});
     }
     if (url.pathname === '/login') return req.method === 'POST' ? login(req, env) : loginPage();
     if (url.pathname === '/logout') return new Response(null, {status: 303, headers: {location: '/', 'set-cookie': sessionCookie('', 0)}});

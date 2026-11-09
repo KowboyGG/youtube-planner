@@ -5,6 +5,7 @@ import * as P from './planer.js';
 import * as A from './analytics.js';
 import {loadSnapshots, SNAP_EVERY} from './snapshots.js';
 import * as G from './gemini.js';
+import * as K from './knowledge.js';
 import {db} from './store.js';
 
 const {num, x1, fmtDur, daysAgo, ytIdFrom} = P;
@@ -487,6 +488,37 @@ export const TOOLS = [
           'Приёмы в нём: ' + (st.patterns.filter(p => p.x != null && p.fn(title)).map(p => `${p.t} ${x1(p.x)}`).join(', ') || 'нет'));
       }
       return L.join('\n');
+    }
+  },
+  /* ================= база знаний автора (папка knowledge/) ================= */
+  {
+    name: 'knowledge', title: 'База знаний автора',
+    description: 'База знаний, которую собрал автор: правила YouTube, упаковка (названия и превью), хуки, удержание, алгоритм, стратегия, наблюдения по нише. ' +
+      'Перед советом найди подходящие разделы (query) и опирайся на них, а не на общие знания; без параметров — список тем; topic — тема целиком. Бесплатно.',
+    inputSchema: obj({query: {type: 'string', minLength: 2, maxLength: 300, description: 'Что ищешь, например «хук первые секунды» или «норма CTR»'},
+      topic: {type: 'string', minLength: 1, description: 'Тема из списка — прочитать целиком'}}),
+    annotations: READ,
+    async run({query, topic}) {
+      const list = K.knowledgeTopics(), names = list.map(t => t.slug).join(', ');
+      if (!list.length) return 'База знаний пока пустая — автор её ещё не заполнил. Отвечай по общим знаниям и скажи об этом.';
+      if (topic) {
+        const t = K.findTopic(topic);
+        if (!t) throw new ToolError(`Темы «${topic}» нет. Темы: ${names}.`);
+        return `# ${t.title} [${t.slug}]\n${t.when ? 'Когда применять: ' + t.when + '\n' : ''}\n${t.body.length > 40000 ? t.body.slice(0, 40000) + '\n…(обрезано)' : t.body}`;
+      }
+      if (query) {
+        const hits = K.searchKnowledge(query);
+        if (!hits.length) return `По «${query}» в базе ничего не нашлось. Темы: ${names}.`;
+        let out = '', n = 0;
+        for (const h of hits) {
+          const part = `### ${h.topic.title}${h.section.heading ? ' → ' + h.section.heading : ''} [${h.topic.slug}]\n${h.section.text}\n\n`;
+          if (out && out.length + part.length > 15000) break;
+          out += part; n++;
+        }
+        return out.trim() + (n < hits.length ? `\n\n(ещё ${hits.length - n} разделов — уточни запрос или открой тему целиком)` : '');
+      }
+      return 'Темы базы знаний:\n' + list.map(t => `- [${t.slug}] ${t.title}${t.when ? ' — когда: ' + t.when : ''}` +
+        (t.tags.length ? ` (теги: ${t.tags.join(', ')})` : '') + (t.always ? ' — мастер-инструкция, она уже в твоих инструкциях' : '')).join('\n');
     }
   },
   /* ================= видео глазами Gemini и превью ================= */
