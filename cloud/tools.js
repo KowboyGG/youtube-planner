@@ -4,6 +4,8 @@ import {ToolError} from './mcp.js';
 import * as P from './planer.js';
 import * as A from './analytics.js';
 import {loadSnapshots, SNAP_EVERY} from './snapshots.js';
+import * as G from './gemini.js';
+import {db} from './store.js';
 
 const {num, x1, fmtDur, daysAgo, ytIdFrom} = P;
 const plural = (n, [one, few, many]) => { const a = n % 10, b = n % 100; return `${num(n)} ${a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many}`; };
@@ -88,6 +90,57 @@ export async function makeToolContext(env, ctx) {
       if (!data) throw new ToolError('В облачном планере ещё нет данных — автору нужно открыть планер и перенести копию.');
       return data;
     }};
+}
+
+
+/* ----- видео глазами Gemini и превью ----- */
+// Любой ролик: ссылка или id YouTube, либо видео из планера (id или часть названия)
+async function anyVideoId(ctx, ref) {
+  const id = ytIdFrom(ref);
+  if (id) return id;
+  const v = findMyVideo(await ctx.data(), ref), yid = v.yt?.id || ytIdFrom(v.link);
+  if (!yid) throw new ToolError(`«${v.title || 'Без названия'}» ещё не на YouTube — Gemini смотрит только опубликованные публичные ролики.`);
+  return yid;
+}
+// Название, канал и длительность — чтобы подписать ответ и не отдавать Gemini многочасовые стримы целиком
+async function videoInfo(ctx, yid) {
+  if (ctx.env.YT_KEY) try {
+    const it = (await ytVideos(ctx.env, [yid]))[0];
+    if (it) return {title: it.snippet.title, channel: it.snippet.channelTitle, dur: P.isoDur(it.contentDetails?.duration)};
+  } catch (e) {}
+  const data = await ctx.load().then(r => r.data).catch(() => null), v = data?.videos.find(v => v.yt?.id === yid); // запасной вариант — данные планера
+  if (v) return {title: v.title || v.yt.title, channel: 'твоё видео', dur: v.yt.duration || 0};
+  for (const c of data?.competitors || []) { const rv = (c.videos || []).find(x => x.id === yid); if (rv) return {title: rv.title, channel: c.title, dur: rv.duration || 0}; }
+  return null;
+}
+const clipRange = (from, to) => from || to ? ` · кусок ${fmtDur(from)}–${to ? fmtDur(to) : 'конец'}` : '';
+const geminiHead = (yid, info, from, to, r) => `${info ? `«${info.title}» — ${info.channel}, ${fmtDur(info.dur)}` : 'Видео'} youtu.be/${yid}${clipRange(from, to)}` +
+  ` (Gemini${r.model ? ' ' + r.model : ''}${r.cached ? ', сохранённый ответ' : ''})`;
+const PENDING = 'Gemini ещё смотрит видео — ролик длинный. Вызови этот же инструмент с теми же параметрами через 1–2 минуты: результат сохранится в облаке.';
+const MAX_CLIP = 2400; // больше 40 минут за раз не отдаём: долго и съедает дневной лимит Gemini
+
+const b64 = bytes => { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s); };
+const IMG_BASE = env => env.YT_IMG_BASE || 'https://i.ytimg.com/vi/';
+const MIME = {jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif'};
+// Превью ролика с YouTube: в ленте его видят примерно 320×180 (mqdefault), крупно — максимальное доступное
+async function ytThumb(env, yid, size) {
+  for (const name of size === 'feed' ? ['mqdefault'] : ['maxresdefault', 'sddefault', 'hqdefault']) {
+    const r = await fetch(`${IMG_BASE(env)}${yid}/${name}.jpg`).catch(() => null);
+    if (r?.ok) return {bytes: new Uint8Array(await r.arrayBuffer()), mime: 'image/jpeg'};
+  }
+  return null;
+}
+// Превью из планера: картинка в облаке (data/images/…), ссылка или data:-строка
+async function plannerThumb(env, src) {
+  const s = String(src || '');
+  let m = s.match(/^data\/images\/([\w-]+)\.(png|jpe?g|webp|gif)$/);
+  if (m) {
+    const row = await (await db(env)).prepare('SELECT v FROM kv WHERE k = ?').bind(`img:${m[1]}.${m[2]}`).first();
+    return row && {bytes: new Uint8Array(row.v), mime: MIME[m[2]]};
+  }
+  if ((m = s.match(/^data:(image\/[\w+.-]+);base64,(.+)$/))) return {bytes: Uint8Array.from(atob(m[2]), c => c.charCodeAt(0)), mime: m[1]};
+  if (/^https:\/\//.test(s)) { const r = await fetch(s).catch(() => null); if (r?.ok) return {bytes: new Uint8Array(await r.arrayBuffer()), mime: (r.headers.get('content-type') || 'image/jpeg').split(';')[0]}; }
+  return null;
 }
 
 /* ----- поиск объектов по тому, что передал Claude ----- */
@@ -434,6 +487,95 @@ export const TOOLS = [
           'Приёмы в нём: ' + (st.patterns.filter(p => p.x != null && p.fn(title)).map(p => `${p.t} ${x1(p.x)}`).join(', ') || 'нет'));
       }
       return L.join('\n');
+    }
+  },
+  /* ================= видео глазами Gemini и превью ================= */
+  {
+    name: 'video_transcript', title: 'Транскрипт видео',
+    description: 'Дословная расшифровка речи любого публичного ролика YouTube (своего или чужого) с таймкодами [м:сс]. Делает Gemini: он смотрит видео по ссылке. ' +
+      'Полезно, чтобы разобрать хук и структуру у конкурента или сравнить сказанное со сценарием из планера (get_video) и провалами удержания (video_analytics). ' +
+      'Готовые расшифровки хранятся в облаке, повтор мгновенный. Ролики длиннее 40 минут — кусками через from/to. Возможны ошибки в именах и терминах. 1 единица лимита YouTube.',
+    inputSchema: obj({video: {type: 'string', minLength: 1, description: 'Ссылка, id YouTube или видео из планера (id или часть названия)'},
+      from: {type: 'integer', minimum: 0, description: 'С какой секунды (необязательно)'}, to: {type: 'integer', minimum: 1, description: 'По какую секунду (необязательно)'}}, ['video']),
+    annotations: READ_WEB,
+    async run({video, from = 0, to = 0}, ctx) {
+      if (to && to <= from) throw new ToolError('to должно быть больше from.');
+      const yid = await anyVideoId(ctx, video), info = await videoInfo(ctx, yid);
+      let note = '';
+      if (info?.dur > MAX_CLIP && (to || info.dur) - from > MAX_CLIP) {
+        to = from + MAX_CLIP;
+        note = `Видео длинное — здесь ${fmtDur(from)}–${fmtDur(to)}; продолжение: from ${to}.`;
+      }
+      const r = await G.transcript(ctx.env, ctx.ctx, yid, {from, to});
+      if (r.pending) return PENDING;
+      return [geminiHead(yid, info, from, to, r), note, r.truncated ? `Расшифровка оборвалась по длине — продолжение возьми через from, начиная с последнего таймкода.` : '', '', r.text]
+        .filter((x, i) => x || i === 3).join('\n');
+    }
+  },
+  {
+    name: 'watch_video', title: 'Посмотреть видео',
+    description: 'Вопрос о самом видео: Gemini смотрит картинку и слушает звук любого публичного ролика YouTube и отвечает с таймкодами. ' +
+      'Например: что на экране в первые 10 секунд и как сделан хук; где темп проседает; какой текст и графика в кадре; чем подача конкурента отличается от моей; ' +
+      'совпадает ли превью с началом ролика. Для точечного разбора задай from/to — кусок до 5 минут смотрится подробнее. Ответы хранятся неделю. 1 единица лимита YouTube.',
+    inputSchema: obj({video: {type: 'string', minLength: 1, description: 'Ссылка, id YouTube или видео из планера'},
+      question: {type: 'string', minLength: 3, maxLength: 2000, description: 'Что посмотреть в видео'},
+      from: {type: 'integer', minimum: 0, description: 'С какой секунды'}, to: {type: 'integer', minimum: 1, description: 'По какую секунду'}}, ['video', 'question']),
+    annotations: READ_WEB,
+    async run({video, question, from = 0, to = 0}, ctx) {
+      if (to && to <= from) throw new ToolError('to должно быть больше from.');
+      const yid = await anyVideoId(ctx, video), info = await videoInfo(ctx, yid);
+      let note = '';
+      if (info?.dur > MAX_CLIP && (to || info.dur) - from > MAX_CLIP) { to = from + MAX_CLIP; note = `Видео длинное — Gemini смотрел ${fmtDur(from)}–${fmtDur(to)}.`; }
+      const r = await G.askVideo(ctx.env, ctx.ctx, yid, question.trim(), {from, to});
+      if (r.pending) return PENDING;
+      return [geminiHead(yid, info, from, to, r), note, '', r.text].filter((x, i) => x || i === 2).join('\n');
+    }
+  },
+  {
+    name: 'thumbnails', title: 'Превью видео',
+    description: 'Показывает сами картинки превью — их можно разглядеть и разобрать: свои ролики, черновики превью из планера (ещё не опубликованные видео), ' +
+      'ролики конкурентов и любые по ссылкам. Чтобы сравнить с тем, что выстрелило в нише, сначала возьми id из outliers или competitor_videos. ' +
+      'size: feed — 320×180, как превью видят в ленте (по умолчанию, когда картинок больше двух); full — крупно. До 10 штук. Лимит YouTube: до 1 единицы.',
+    inputSchema: obj({videos: {type: 'array', minItems: 1, maxItems: 10, items: {type: 'string'}, description: 'Ссылки, id YouTube или видео из планера (id или часть названия)'},
+      size: {type: 'string', enum: ['feed', 'full']}}, ['videos']),
+    annotations: READ_WEB,
+    async run({videos, size}, ctx) {
+      size ||= videos.length <= 2 ? 'full' : 'feed';
+      const data = await ctx.load().then(r => r.data).catch(() => null), items = [];
+      for (const ref of videos) {
+        const q = String(ref).trim(), yid = ytIdFrom(q);
+        let mine = data?.videos.find(v => v.id === q || (yid && (v.yt?.id === yid || ytIdFrom(v.link) === yid)));
+        if (!mine && !yid) {
+          if (!data) { items.push({ref: q, error: 'не похоже на ссылку или id ролика'}); continue; }
+          try { mine = findMyVideo(data, q); } catch (e) { items.push({ref: q, error: e.message}); continue; }
+        }
+        items.push({ref: q, mine, yid: yid || mine?.yt?.id || ytIdFrom(mine?.link)});
+      }
+      const known = new Map();
+      for (const c of data?.competitors || []) for (const v of c.videos || []) known.set(v.id, {title: v.title, channel: c.title, views: v.views});
+      for (const v of data?.videos || []) if (v.yt?.id) known.set(v.yt.id, {title: v.title || v.yt.title, channel: 'твоё видео', views: v.yt.views});
+      const unknown = [...new Set(items.filter(i => i.yid && !known.has(i.yid)).map(i => i.yid))];
+      if (unknown.length && ctx.env.YT_KEY) try {
+        for (const it of await ytVideos(ctx.env, unknown, 'snippet,statistics')) known.set(it.id, {title: it.snippet.title, channel: it.snippet.channelTitle, views: +it.statistics?.viewCount || 0});
+      } catch (e) {}
+      const pics = await Promise.all(items.map(async i => {
+        if (i.error) return null;
+        // у вышедшего видео — то превью, что сейчас на YouTube; у невышедшего — черновик из планера
+        if (i.yid) { const p = await ytThumb(ctx.env, i.yid, size); if (p) return {...p, from: 'youtube'}; }
+        if (i.mine?.thumb) { const p = await plannerThumb(ctx.env, i.mine.thumb); if (p) return {...p, from: 'planner'}; }
+        return null;
+      }));
+      const content = [{type: 'text', text: `Превью: ${size === 'feed' ? '320×180 — так их видят в ленте' : 'крупно'}.`}];
+      items.forEach((i, n) => {
+        const k = i.yid && known.get(i.yid), p = pics[n];
+        const label = `${n + 1}. ` + (k ? `«${k.title}» — ${k.channel}, ${num(k.views)} просм.` : i.mine ? `«${i.mine.title || 'Без названия'}» — твоё видео, ещё не вышло` : i.ref) +
+          (i.yid ? ` youtu.be/${i.yid}` : '') + (p?.from === 'planner' ? ' (черновик превью из планера)' : '');
+        if (i.error) content.push({type: 'text', text: `${label}: ${i.error}`});
+        else if (!p) content.push({type: 'text', text: `${label}: превью нет${i.mine && !i.yid ? ' — загрузи его в видео в планере' : ''}.`});
+        else if (p.bytes.length > 4.5e6) content.push({type: 'text', text: `${label}: картинка слишком большая (${(p.bytes.length / 1e6).toFixed(1)} МБ) — сожми её в планере.`});
+        else content.push({type: 'text', text: label}, {type: 'image', data: b64(p.bytes), mimeType: p.mime});
+      });
+      return {content};
     }
   },
   /* ================= YouTube Analytics (нужен Google, подключённый к облаку) ================= */

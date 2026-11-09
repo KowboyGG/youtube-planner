@@ -7,7 +7,8 @@ const SERVER_INFO = {name: 'youtube-planer', title: 'YouTube-планер', vers
 const INSTRUCTIONS = 'Личный YouTube-планер автора: его канал и видео (этапы производства, сценарии, дедлайны, статистика), ' +
   'конкуренты с «иксами» (во сколько раз ролик набрал больше медианы своего канала), поиск по нише и тренды YouTube. ' +
   'Начинай с channel_overview, чтобы понять канал. Всё, что пишешь в планер (идеи, сценарии, дедлайны), автор сразу видит у себя. ' +
-  'Поиск по YouTube (search_youtube) дорогой для дневного лимита API — не вызывай его без надобности.';
+  'Поиск по YouTube (search_youtube) дорогой для дневного лимита API — не вызывай его без надобности. ' +
+  'Любой публичный ролик можно расшифровать (video_transcript) и посмотреть глазами Gemini (watch_video), а превью — увидеть картинками (thumbnails).';
 
 const RPC = {PARSE: -32700, INVALID_REQUEST: -32600, METHOD_NOT_FOUND: -32601, INVALID_PARAMS: -32602, INTERNAL: -32603};
 const rpcError = (id, code, message, data) => ({jsonrpc: '2.0', id: id ?? null, error: {code, message, ...(data !== undefined && {data})}});
@@ -73,6 +74,7 @@ async function dispatch(msg, tools, makeContext) {
       if (problems.length) return rpcResult(id, {content: [{type: 'text', text: 'Неверные параметры: ' + problems.join('; ')}], isError: true});
       try {
         const out = await tool.run(params.arguments || {}, await makeContext());
+        if (Array.isArray(out?.content)) return rpcResult(id, {content: out.content}); // текст вперемешку с картинками
         const text = typeof out === 'string' ? out : JSON.stringify(out, null, 1);
         return rpcResult(id, {content: [{type: 'text', text}]});
       } catch (e) {
