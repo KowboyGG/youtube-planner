@@ -122,7 +122,8 @@ const clipRange = (from, to) => from || to ? ` · кусок ${fmtDur(from)}–$
 const geminiHead = (yid, info, from, to, r) => `${info ? `«${info.title}» — ${info.channel}, ${fmtDur(info.dur)}` : 'Видео'} youtu.be/${yid}${clipRange(from, to)}` +
   ` (Gemini${r.model ? ' ' + r.model : ''}${r.cached ? ', сохранённый ответ' : ''})`;
 const PENDING = 'Gemini ещё смотрит видео — ролик длинный. Вызови этот же инструмент с теми же параметрами через 1–2 минуты: результат сохранится в облаке.';
-const MAX_CLIP = 2400; // больше 40 минут за раз не отдаём: долго и съедает дневной лимит Gemini
+const MAX_CLIP = 2400; // больше 40 минут за раз Gemini не смотрит: долго и съедает дневной лимит
+const MAX_TRANSCRIPT = 1800; // транскрипт за раз — до 30 минут (6 частей по 5 минут параллельно)
 
 const b64 = bytes => { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s); };
 const IMG_BASE = env => env.YT_IMG_BASE || 'https://i.ytimg.com/vi/';
@@ -530,22 +531,29 @@ export const TOOLS = [
     name: 'video_transcript', title: 'Транскрипт видео',
     description: 'Дословная расшифровка речи любого публичного ролика YouTube (своего или чужого) с таймкодами [м:сс]. Делает Gemini: он смотрит видео по ссылке. ' +
       'Полезно, чтобы разобрать хук и структуру у конкурента или сравнить сказанное со сценарием из планера (get_video) и провалами удержания (video_analytics). ' +
-      'Готовые расшифровки хранятся в облаке, повтор мгновенный. Ролики длиннее 40 минут — кусками через from/to. Возможны ошибки в именах и терминах. 1 единица лимита YouTube.',
+      'Длинные ролики расшифровываются частями по 5 минут параллельно; готовые части хранятся в облаке, повтор мгновенный. За раз — до 30 минут, дальше через from/to. Возможны ошибки в именах и терминах. 1 единица лимита YouTube.',
     inputSchema: obj({video: {type: 'string', minLength: 1, description: 'Ссылка, id YouTube или видео из планера (id или часть названия)'},
       from: {type: 'integer', minimum: 0, description: 'С какой секунды (необязательно)'}, to: {type: 'integer', minimum: 1, description: 'По какую секунду (необязательно)'}}, ['video']),
     annotations: READ_WEB,
     async run({video, from = 0, to = 0}, ctx) {
       if (to && to <= from) throw new ToolError('to должно быть больше from.');
       const yid = await anyVideoId(ctx, video), info = await videoInfo(ctx, yid);
+      if (info?.dur && from >= info.dur) throw new ToolError(`Видео длится ${fmtDur(info.dur)} — from за пределами ролика.`);
+      if (info?.dur) to = Math.min(to || info.dur, info.dur);
       let note = '';
-      if (info?.dur > MAX_CLIP && (to || info.dur) - from > MAX_CLIP) {
-        to = from + MAX_CLIP;
-        note = `Видео длинное — здесь ${fmtDur(from)}–${fmtDur(to)}; продолжение: from ${to}.`;
-      }
-      const r = await G.transcript(ctx.env, ctx.ctx, yid, {from, to});
-      if (r.pending) return PENDING;
-      return [geminiHead(yid, info, from, to, r), note, r.truncated ? `Расшифровка оборвалась по длине — продолжение возьми через from, начиная с последнего таймкода.` : '', '', r.text]
-        .filter((x, i) => x || i === 3).join('\n');
+      if (to && to - from > MAX_TRANSCRIPT) { to = from + MAX_TRANSCRIPT; note = `Видео длинное — здесь ${fmtDur(from)}–${fmtDur(to)}; продолжение: from ${to}.`; }
+      const parts = await G.transcriptParts(ctx.env, ctx.ctx, yid, from, to), many = parts.length > 1;
+      const ok = parts.filter(p => p.text), waiting = parts.filter(p => p.pending), failed = parts.filter(p => p.error);
+      if (!ok.length && !waiting.length) throw new ToolError(failed[0].error);
+      if (!ok.length) return PENDING;
+      const span = p => `${fmtDur(p.from)}–${p.to ? fmtDur(p.to) : 'конец'}`;
+      const body = parts.map(p => (many ? `— ${span(p)} —\n` : '') + (p.text || (p.pending ? '(Gemini ещё расшифровывает этот кусок)' : `(не вышло: ${p.error})`))).join('\n\n');
+      const r = {model: ok[0].model, cached: ok.every(p => p.cached)};
+      return [geminiHead(yid, info, parts[0].from, parts[parts.length - 1].to, r), note,
+        waiting.length ? `Готово ${ok.length} из ${parts.length} частей; остальные дорасшифруются — вызови этот же инструмент с теми же параметрами через 1–2 минуты.` : '',
+        failed.length ? `Часть кусков не вышла (${failed.map(span).join(', ')}) — их можно повторить отдельно через from/to.` : '',
+        ok.some(p => p.truncated) ? 'Какая-то часть оборвалась по длине — повтори её отдельно через from/to.' : '',
+        many ? 'Таймкоды внутри частей Gemini иногда считает от начала части — ориентируйся на заголовки частей.' : '', '', body].filter((x, i, a) => x || i === a.length - 2).join('\n');
     }
   },
   {
