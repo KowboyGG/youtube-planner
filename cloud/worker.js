@@ -9,6 +9,7 @@ import {db, getText, put} from './store.js';
 import {oauthRoute, checkAccess, unauthorized, CORS} from './oauth.js';
 import {handleMcp} from './mcp.js';
 import {knowledgeInstructions} from './knowledge.js';
+import {collectHourly} from './timing.js';
 import {TOOLS, makeToolContext} from './tools.js';
 import {loadPlaner, writePlaner} from './planer.js';
 import {googleRoute, googleStatus, googleDisconnect} from './google.js';
@@ -209,6 +210,7 @@ export default {
   // Раз в час: свежая аналитика (раз в сутки), снимок цифр (раз в 6 часов), затем утренний отчёт бота — уже со свежими данными
   async scheduled(event, env, ctx) {
     const log = async (name, job) => { try { console.log(name + ':', (await job()) ?? 'готово'); } catch (e) { console.log(name + ' упал:', e.stack || e); } };
+    await log('просмотры по часам', () => collectHourly(env));
     await log('аналитика', () => dailyAnalytics(env));
     await log('снимок', () => collectSnapshot(env));
     await log('бот', () => botScheduled(env));

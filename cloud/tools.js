@@ -6,6 +6,7 @@ import * as A from './analytics.js';
 import {loadSnapshots, SNAP_EVERY} from './snapshots.js';
 import * as G from './gemini.js';
 import * as K from './knowledge.js';
+import * as T from './timing.js';
 import {db} from './store.js';
 
 const {num, x1, fmtDur, daysAgo, ytIdFrom} = P;
@@ -608,6 +609,57 @@ export const TOOLS = [
         else content.push({type: 'text', text: label}, {type: 'image', data: b64(p.bytes), mimeType: p.mime});
       });
       return {content};
+    }
+  },
+  /* ================= время публикации, набор просмотров, упаковка, новые конкуренты ================= */
+  {
+    name: 'best_time', title: 'Лучшее время публикации',
+    description: 'Когда публиковать: в какие часы и дни недели смотрят зрители автора (облако раз в час записывает просмотры всех его видео; ' +
+      'нужна хотя бы неделя данных), оценка по странам аудитории (если Google подключён), когда выпускают конкуренты и какие часы чаще дают «иксы», ' +
+      'во сколько выходили свои видео и как сыграли. Время — в часовом поясе автора. Бесплатно.',
+    inputSchema: obj({tz: {type: 'string', description: 'Часовой пояс IANA, например Europe/Kyiv; по умолчанию — пояс автора из планера'},
+      days: {type: 'integer', minimum: 7, maximum: 70, description: 'За сколько дней брать наблюдения, по умолчанию 28'}}),
+    annotations: READ_WEB,
+    async run({tz, days = 28}, ctx) {
+      tz = await T.authorTz(ctx.env, tz);
+      try { T.localParts(0, tz); } catch (e) { throw new ToolError(`Не знаю часовой пояс «${tz}» — нужен вид Europe/Kyiv.`); }
+      const data = await ctx.data(), published = new Map(data.videos.filter(v => v.yt?.id && v.yt.publishedAt).map(v => [v.yt.id, Date.parse(v.yt.publishedAt)]));
+      const [snaps, countries] = await Promise.all([T.loadHourly(ctx.env, days), T.audienceCountries(ctx.env)]);
+      const obs = T.activityFromHourly(snaps, published, tz), est = countries?.length ? T.activityFromCountries(countries, tz) : null;
+      const share = arr => { const t = arr.reduce((a, x) => a + (x || 0), 0); return arr.map(x => t ? (x || 0) / t : 0); };
+      const enough = obs.days >= 5, oh = share(obs.hours), eh = est ? share(est.hours) : null;
+      const L = [`Лучшее время публикации — время в поясе ${tz}.`];
+      if (!snaps.length) L.push('', 'Почасовых наблюдений ещё нет: облако начнёт записывать просмотры твоих видео раз в час — через неделю здесь будет твоя реальная картина.');
+      else if (!enough) L.push('', `Почасовых наблюдений пока ${plural(obs.days, ['день', 'дня', 'дней'])} — для выводов нужна хотя бы неделя; пока больше доверяй оценке по странам.`);
+      if (obs.observed || eh) {
+        const bar = x => '█'.repeat(Math.round(x * 120)) || '·';
+        L.push('', 'Доля просмотров по часам суток' + (obs.observed ? ` | наблюдения за ${plural(obs.days, ['день', 'дня', 'дней'])} (все видео, кроме первых трёх суток после выхода)` : '') +
+          (eh ? ` | оценка по странам (покрыто ${Math.round(est.coverage * 100)}% просмотров)` : '') + ':');
+        for (let h = 0; h < 24; h++) L.push(`${String(h).padStart(2, '0')}:00 ` + [obs.observed ? `${(oh[h] * 100).toFixed(1).padStart(4)}% ${bar(oh[h])}` : '', eh ? `оценка ${(eh[h] * 100).toFixed(1)}%` : ''].filter(Boolean).join(' | '));
+      }
+      if (obs.weekdays.some(x => x != null)) {
+        const w = share(obs.weekdays);
+        L.push('', 'По дням недели (средние просмотры в час, доля): ' + T.WD_RU.map((d, i) => obs.weekdays[i] == null ? `${d} —` : `${d} ${Math.round(w[i] * 100)}%`).join(', ') +
+          (obs.days < 14 ? ' — меньше двух недель данных, дни недели пока шумные.' : ''));
+      }
+      if (countries?.length) L.push('', 'Страны аудитории за 28 дн.: ' + countries.slice(0, 8).map(([c, n]) => `${c} ${num(n)}`).join(', '));
+      const rv = T.rivalTiming(data, tz);
+      if (rv.bins.some(b => b.n)) {
+        const fx = x => x == null ? '—' : x1(x);
+        L.push('', 'Конкуренты, длинные видео за полгода — когда выходят (окна по 4 часа): ' +
+          rv.bins.filter(b => b.n).map(b => `${String(b.from).padStart(2, '0')}–${String(b.from + 4).padStart(2, '0')}: ${b.n} шт., медиана ${fx(b.x)}, ×2+ — ${b.hits}`).join('; '),
+          'По дням: ' + rv.weekdays.filter(b => b.n).map(b => `${T.WD_RU[b.wd]} ${b.n} шт. (медиана ${fx(b.x)}, ×2+ — ${b.hits})`).join(', '));
+      }
+      const mine = data.videos.filter(v => v.yt?.publishedAt).sort((a, b) => Date.parse(b.yt.publishedAt) - Date.parse(a.yt.publishedAt)).slice(0, 10);
+      if (mine.length) L.push('', 'Когда выходили твои видео: ' + mine.map(v => { const p = T.localParts(Date.parse(v.yt.publishedAt), tz), x = P.myX(data, v);
+        return `«${clip(v.title || v.yt.title, 40)}» — ${T.WD_RU[p.wd]} ${String(p.hour).padStart(2, '0')}:xx${x != null ? ', ' + x1(x) : ''}`; }).join('; '));
+      const base = enough ? obs.hours.map(x => x || 0) : est?.hours;
+      if (base) {
+        const peak = T.peakWindow(base), at = (peak + 22) % 24;
+        L.push('', `Вывод (${enough ? 'по наблюдениям' : 'по оценке по странам'}): пик просмотров ${String(peak).padStart(2, '0')}:00–${String((peak + 3) % 24).padStart(2, '0')}:00. ` +
+          `Публиковать стоит примерно в ${String(at).padStart(2, '0')}:00 — за 2 часа до пика: первые часы YouTube показывает ролик подписчикам и проверяет в рекомендациях.`);
+      }
+      return L.join('\n');
     }
   },
   /* ================= YouTube Analytics (нужен Google, подключённый к облаку) ================= */
