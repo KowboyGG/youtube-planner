@@ -8,6 +8,7 @@ import * as G from './gemini.js';
 import * as K from './knowledge.js';
 import * as T from './timing.js';
 import * as CV from './curves.js';
+import * as PK from './packaging.js';
 import {getJson, db} from './store.js';
 
 const {num, x1, fmtDur, daysAgo, ytIdFrom} = P;
@@ -713,6 +714,69 @@ export const TOOLS = [
         }
       }
       return L.join('\n');
+    }
+  },
+  {
+    name: 'packaging_changes', title: 'Смены названий и превью',
+    description: 'Какие ролики (свои и конкурентов) сменили название или превью и что стало с просмотрами: темп за 48 ч до смены против 48 ч после ' +
+      'и с поправкой на обычное затухание ролика в этом возрасте (эффект ×2 — смена удвоила темп сверх ожидаемого); для своих видео — CTR и показы до и после. ' +
+      'Облако следит за всеми своими видео и роликами конкурентов до 60 дней: названия — раз в 6 ч, превью — по картинке. ' +
+      'images: true вместе с video — показать превью до и после. Бесплатно.',
+    inputSchema: obj({scope: {type: 'string', enum: ['all', 'mine', 'competitors'], description: 'По умолчанию all'},
+      days: {type: 'integer', minimum: 1, maximum: 120, description: 'За сколько дней, по умолчанию 60'},
+      video: {type: 'string', description: 'Только этот ролик: ссылка, id YouTube или видео из планера'}, images: {type: 'boolean', description: 'Показать превью до и после (нужен video)'}}),
+    annotations: READ,
+    async run({scope = 'all', days = 60, video, images = false}, ctx) {
+      const env = ctx.env, data = await ctx.data(), own = data.channel?.yt?.id;
+      const [events, pkg, curves, tz] = await Promise.all([getJson(env, 'pkg:events'), getJson(env, 'pkg'), getJson(env, 'curves'), T.authorTz(env)]);
+      if (!pkg) return 'Облако ещё не начало следить за упаковкой — первый снимок с отслеживанием будет в течение 6 часов.';
+      let vid = '';
+      if (video) { vid = ytIdFrom(video) || findMyVideo(data, video).yt?.id || ''; if (!vid) throw new ToolError('Это видео ещё не вышло.'); }
+      const from = Date.now() - days * 864e5;
+      const list = (events || []).filter(e => e.t >= from && (!vid || e.id === vid) && (scope === 'all' || (scope === 'mine') === (e.c === own))).sort((a, b) => b.t - a.t);
+      const tracked = Object.keys(pkg).length, thumbsChecked = Object.values(pkg).filter(r => r.th).length;
+      const head = `Слежу за упаковкой ${plural(tracked, VIDEOS)} (превью сверено у ${thumbsChecked}).`;
+      if (!list.length) return head + `\nЗа ${plural(days, ['день', 'дня', 'дней'])} смен ${vid ? 'у этого ролика ' : ''}не замечено.`;
+      const titles = new Map([...data.videos.filter(v => v.yt?.id).map(v => [v.yt.id, v.title || v.yt.title]), ...(data.competitors || []).flatMap(c => (c.videos || []).map(v => [v.id, v.title]))]);
+      const chName = c => c === own ? 'твоё' : (data.competitors || []).find(x => x.id === c)?.title || 'канал ' + c;
+      const when = t => new Date(t).toLocaleString('ru-RU', {timeZone: tz, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
+      const vph = (a, b) => a && b ? (b[1] - a[1]) / Math.max(1, (b[0] - a[0]) / 3600e3) : null;
+      const reachSum = (yid, d0, d1) => { let impr = 0, clicks = 0;
+        for (const [d, vids] of Object.entries(data.reach?.days || {})) if (d >= d0 && d <= d1 && vids[yid]) { impr += vids[yid][0]; clicks += vids[yid][0] * vids[yid][1]; }
+        return impr ? {impr, ctr: clicks / impr} : null; };
+      const pct = x => (x * 100).toFixed(1).replace('.', ',') + '%';
+      const L = [head, ''];
+      for (const e of list.slice(0, 40)) {
+        const what = e.type === 'title' ? `название «${clip(e.from, 70)}» → «${clip(e.to, 70)}»` : `превью${e.back ? ' (вернули одно из прежних — похоже на A/B-тест превью)' : ''}`;
+        let line = `- ${when(e.t)} · ${chName(e.c)} · «${clip(titles.get(e.id) || (e.type === 'title' ? e.to : e.id), 60)}» youtu.be/${e.id} — ${what}`;
+        const before = e.vB ? vph(e.vB, [e.t, e.v0]) : null, after = e.vA ? vph([e.t, e.v0], e.vA) : null;
+        if (after != null && before) {
+          line += `; темп до ${num(before)}/ч, после ${num(after)}/ч: ${x1(after / before)}`;
+          const r = curves?.[e.id], list2 = r && CV.channelCurves(curves, r.c, !!r.s);
+          if (r && list2) {
+            const a = (e.t - r.p) / 3600e3, n = age => CV.normAt(list2, age, e.id).median;
+            const [m0, m1, m2] = [n(Math.max(0, a - 48)), n(a), n(a + 48)];
+            if (m0 != null && m1 != null && m2 != null && m1 > m0 && m2 > m1) { const exp = (m2 - m1) / (m1 - m0); line += `; обычно в этом возрасте ${x1(exp)} → эффект ≈${x1(after / before / exp)}`; }
+          }
+        } else if (e.vA === undefined && Date.now() - e.t < 48 * 3600e3) line += `; темп «после» будет через ${Math.ceil((e.t + 48 * 3600e3 - Date.now()) / 3600e3)} ч`;
+        else if (!e.vB) line += '; темп «до» неизвестен — облако не застало ролик за 48 ч до смены';
+        if (e.c === own) {
+          const day = new Date(e.t).toISOString().slice(0, 10), b = reachSum(e.id, P.isoPlus(day, -7), P.isoPlus(day, -1)), a = reachSum(e.id, P.isoPlus(day, 1), P.isoPlus(day, 7));
+          if (b && a) line += `; CTR ${pct(b.ctr)} → ${pct(a.ctr)} (показы за 7 дн. ${num(b.impr)} → ${num(a.impr)})`;
+        }
+        L.push(line);
+      }
+      if (list.length > 40) L.push(`…и ещё ${list.length - 40}. Сузь days или scope.`);
+      L.push('', 'Точное время смены — между прошлой проверкой и отмеченным моментом (до 6–7 ч). Темп сравнивается по снимкам облака.');
+      if (!(images && vid)) return L.join('\n');
+      const content = [{type: 'text', text: L.join('\n')}];
+      for (const e of list.filter(e => e.type === 'thumb').slice(0, 4)) {
+        const [b, a] = await Promise.all([PK.loadImage(env, e.from), PK.loadImage(env, e.to)]);
+        content.push({type: 'text', text: `${when(e.t)} — превью до:`}, ...(b ? [{type: 'image', data: b64(b), mimeType: 'image/jpeg'}] : [{type: 'text', text: '(картинка «до» не сохранилась)'}]),
+          {type: 'text', text: 'после:'}, ...(a ? [{type: 'image', data: b64(a), mimeType: 'image/jpeg'}] : [{type: 'text', text: '(картинка «после» не сохранилась)'}]));
+      }
+      if (content.length === 1) content.push({type: 'text', text: 'Смен превью у этого ролика нет — только названия.'});
+      return {content};
     }
   },
   /* ================= YouTube Analytics (нужен Google, подключённый к облаку) ================= */

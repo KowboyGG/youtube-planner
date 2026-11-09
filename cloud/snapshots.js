@@ -3,6 +3,7 @@
 // планер получает свежие цифры без открытого браузера: новые ролики конкурентов, точки роста своих видео и канала.
 import {yt, loadPlaner, mutatePlaner, toRivalVideo, isoDur} from './planer.js';
 import {updateCurves} from './curves.js';
+import {trackPackaging} from './packaging.js';
 import {getJson, putJson, put, removeOlder, db} from './store.js';
 
 export const SNAP_EVERY = 6 * 3600e3, SNAP_KEEP = 120 * 864e5, RECENT_DAYS = 60;
@@ -52,6 +53,7 @@ export async function collectSnapshot(env, {force = false} = {}) {
     await updateCurves(env, items.map(it => ({id: it.id, c: it.snippet.channelId, p: Date.parse(it.snippet.publishedAt), t: now, views: +it.statistics?.viewCount || 0,
       s: shortIds.has(it.id) || (!it.liveStreamingDetails && isoDur(it.contentDetails?.duration) <= 60)})));
   } catch (e) { console.log('набор просмотров:', e.message); }
+  try { console.log(await trackPackaging(env, items, now)); } catch (e) { console.log('упаковка:', e.message); }
 
   // те же цифры — в планер
   const byId = new Map(items.map(it => [it.id, it]));
