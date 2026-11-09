@@ -8,6 +8,9 @@ import {hex, sign as signFor, sameText, tooManyFailures, countFailure, page, LOG
 import {db, getText, put} from './store.js';
 import {oauthRoute, checkAccess, unauthorized, CORS} from './oauth.js';
 import {handleMcp} from './mcp.js';
+import {knowledgeInstructions} from './knowledge.js';
+import {collectHourly} from './timing.js';
+import {checkThumbs} from './packaging.js';
 import {TOOLS, makeToolContext} from './tools.js';
 import {loadPlaner, writePlaner} from './planer.js';
 import {googleRoute, googleStatus, googleDisconnect} from './google.js';
@@ -186,7 +189,7 @@ export default {
     if (url.pathname === '/mcp') {
       const access = await checkAccess(req, env);
       if (!access.ok) return unauthorized(url.origin, access.invalid);
-      return handleMcp(req, {tools: TOOLS, makeContext: () => makeToolContext(env, ctx), cors: CORS});
+      return handleMcp(req, {tools: TOOLS, makeContext: () => makeToolContext(env, ctx), cors: CORS, instructions: knowledgeInstructions()});
     }
     if (url.pathname === '/login') return req.method === 'POST' ? login(req, env) : loginPage();
     if (url.pathname === '/logout') return new Response(null, {status: 303, headers: {location: '/', 'set-cookie': sessionCookie('', 0)}});
@@ -207,9 +210,13 @@ export default {
 
   // Раз в час: свежая аналитика (раз в сутки), снимок цифр (раз в 6 часов), затем утренний отчёт бота — уже со свежими данными
   async scheduled(event, env, ctx) {
-    const log = async (name, job) => { try { console.log(name + ':', (await job()) ?? 'готово'); } catch (e) { console.log(name + ' упал:', e.stack || e); } };
+    const done = {};
+    const log = async (name, job) => { try { done[name] = String((await job()) ?? 'готово'); console.log(name + ':', done[name]); } catch (e) { console.log(name + ' упал:', e.stack || e); } };
+    await log('просмотры по часам', () => collectHourly(env));
     await log('аналитика', () => dailyAnalytics(env));
     await log('снимок', () => collectSnapshot(env));
     await log('бот', () => botScheduled(env));
+    // превью сверяем в часы без тяжёлых задач: у бесплатного воркера ~50 внешних запросов за запуск
+    if (!/^снято/.test(done['снимок'] || '') && !/^обновлена/.test(done['аналитика'] || '')) await log('превью', () => checkThumbs(env, 20));
   }
 };

@@ -7,7 +7,9 @@ const SERVER_INFO = {name: 'youtube-planer', title: 'YouTube-планер', vers
 const INSTRUCTIONS = 'Личный YouTube-планер автора: его канал и видео (этапы производства, сценарии, дедлайны, статистика), ' +
   'конкуренты с «иксами» (во сколько раз ролик набрал больше медианы своего канала), поиск по нише и тренды YouTube. ' +
   'Начинай с channel_overview, чтобы понять канал. Всё, что пишешь в планер (идеи, сценарии, дедлайны), автор сразу видит у себя. ' +
-  'Поиск по YouTube (search_youtube) дорогой для дневного лимита API — не вызывай его без надобности.';
+  'Поиск по YouTube (search_youtube) дорогой для дневного лимита API — не вызывай его без надобности. ' +
+  'Если в базе знаний автора (knowledge) есть тема по вопросу — сначала загляни в неё. ' +
+  'Любой публичный ролик можно расшифровать (video_transcript) и посмотреть глазами Gemini (watch_video), а превью — увидеть картинками (thumbnails).';
 
 const RPC = {PARSE: -32700, INVALID_REQUEST: -32600, METHOD_NOT_FOUND: -32601, INVALID_PARAMS: -32602, INTERNAL: -32603};
 const rpcError = (id, code, message, data) => ({jsonrpc: '2.0', id: id ?? null, error: {code, message, ...(data !== undefined && {data})}});
@@ -50,7 +52,7 @@ export function validateArgs(schema, args) {
 // Ошибка, которую инструмент показывает Claude как результат (isError), а не как сбой протокола
 export class ToolError extends Error {}
 
-async function dispatch(msg, tools, makeContext) {
+async function dispatch(msg, tools, makeContext, extra = '') {
   if (!msg || typeof msg !== 'object' || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string')
     return rpcError(msg?.id, RPC.INVALID_REQUEST, 'Ожидался запрос JSON-RPC 2.0');
   const isNotification = !('id' in msg);
@@ -60,7 +62,7 @@ async function dispatch(msg, tools, makeContext) {
     case 'initialize': {
       const asked = params.protocolVersion;
       return rpcResult(id, {protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
-        capabilities: {tools: {listChanged: false}}, serverInfo: SERVER_INFO, instructions: INSTRUCTIONS});
+        capabilities: {tools: {listChanged: false}}, serverInfo: SERVER_INFO, instructions: INSTRUCTIONS + extra});
     }
     case 'ping': return rpcResult(id, {});
     case 'tools/list':
@@ -73,6 +75,7 @@ async function dispatch(msg, tools, makeContext) {
       if (problems.length) return rpcResult(id, {content: [{type: 'text', text: 'Неверные параметры: ' + problems.join('; ')}], isError: true});
       try {
         const out = await tool.run(params.arguments || {}, await makeContext());
+        if (Array.isArray(out?.content)) return rpcResult(id, {content: out.content}); // текст вперемешку с картинками
         const text = typeof out === 'string' ? out : JSON.stringify(out, null, 1);
         return rpcResult(id, {content: [{type: 'text', text}]});
       } catch (e) {
@@ -91,7 +94,8 @@ const json = (body, status = 200, headers = {}) => new Response(body == null ? n
   {status, headers: {...(body != null && {'content-type': 'application/json'}), 'cache-control': 'no-store', ...headers}});
 
 // Обработка /mcp. Авторизацию проверяет вызывающий код до этого места.
-export async function handleMcp(req, {tools, makeContext, cors = {}}) {
+// instructions — добавка к стартовой инструкции (мастер-текст и темы базы знаний)
+export async function handleMcp(req, {tools, makeContext, cors = {}, instructions = ''}) {
   if (req.method === 'GET' || req.method === 'DELETE') // потока событий и сессий у нас нет — по спецификации отвечаем 405
     return new Response(null, {status: 405, headers: {allow: 'POST', ...cors}});
   if (req.method !== 'POST') return new Response(null, {status: 405, headers: {allow: 'POST', ...cors}});
@@ -104,7 +108,7 @@ export async function handleMcp(req, {tools, makeContext, cors = {}}) {
   if (batch && !body.length) return json(rpcError(null, RPC.INVALID_REQUEST, 'Пустой пакет'), 400, cors);
   let context; // контекст (данные планера и т. п.) создаём один раз на запрос и только если он нужен
   const lazy = () => context ||= makeContext();
-  const replies = (await Promise.all((batch ? body : [body]).map(m => dispatch(m, tools, lazy)))).filter(Boolean);
+  const replies = (await Promise.all((batch ? body : [body]).map(m => dispatch(m, tools, lazy, instructions)))).filter(Boolean);
   if (!replies.length) return new Response(null, {status: 202, headers: cors}); // одни уведомления
   return json(batch ? replies : replies[0], 200, cors);
 }

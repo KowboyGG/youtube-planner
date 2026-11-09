@@ -1,7 +1,9 @@
 // Снимки цифр раз в 6 часов: подписчики и просмотры каналов (свой и конкуренты), просмотры свежих роликов.
 // Из снимков считаются «что разгоняется» и история роста (инструменты momentum и channel_history), а заодно
 // планер получает свежие цифры без открытого браузера: новые ролики конкурентов, точки роста своих видео и канала.
-import {yt, loadPlaner, mutatePlaner, toRivalVideo} from './planer.js';
+import {yt, loadPlaner, mutatePlaner, toRivalVideo, isoDur} from './planer.js';
+import {updateCurves} from './curves.js';
+import {trackPackaging} from './packaging.js';
 import {getJson, putJson, put, removeOlder, db} from './store.js';
 
 export const SNAP_EVERY = 6 * 3600e3, SNAP_KEEP = 120 * 864e5, RECENT_DAYS = 60;
@@ -44,6 +46,14 @@ export async function collectSnapshot(env, {force = false} = {}) {
   await put(env, 'snap:' + new Date(now).toISOString(), JSON.stringify(snap));
   await removeOlder(env, 'snap:2', SNAP_KEEP); // префикс «snap:2…» — только снимки, служебную запись snap:last не трогаем
   await putJson(env, 'snap:last', {at: now, units});
+  // точки для «набора просмотров»: Shorts отличаем по типу из планера, иначе по длительности
+  const shortIds = new Set([...(data.videos || []).filter(v => v.type === 'short').map(v => v.yt?.id),
+    ...(data.competitors || []).flatMap(c => (c.videos || []).filter(v => v.kind === 'short').map(v => v.id))].filter(Boolean));
+  try {
+    await updateCurves(env, items.map(it => ({id: it.id, c: it.snippet.channelId, p: Date.parse(it.snippet.publishedAt), t: now, views: +it.statistics?.viewCount || 0,
+      s: shortIds.has(it.id) || (!it.liveStreamingDetails && isoDur(it.contentDetails?.duration) <= 60)})));
+  } catch (e) { console.log('набор просмотров:', e.message); }
+  try { console.log(await trackPackaging(env, items, now)); } catch (e) { console.log('упаковка:', e.message); }
 
   // те же цифры — в планер
   const byId = new Map(items.map(it => [it.id, it]));
@@ -67,7 +77,7 @@ export async function collectSnapshot(env, {force = false} = {}) {
       for (const it of items) {
         if (it.snippet.channelId !== r.id) continue;
         const v = known.get(it.id);
-        if (v) Object.assign(v, {views: +it.statistics?.viewCount || 0, likes: +it.statistics?.likeCount || 0, comments: +it.statistics?.commentCount || 0});
+        if (v) Object.assign(v, {title: it.snippet.title, views: +it.statistics?.viewCount || 0, likes: +it.statistics?.likeCount || 0, comments: +it.statistics?.commentCount || 0});
         else { r.videos.push(toRivalVideo(it)); added++; } // тип у нового ролика пока по длительности — планер уточнит при полном обновлении
       }
       r.videos.sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));

@@ -4,6 +4,13 @@ import {ToolError} from './mcp.js';
 import * as P from './planer.js';
 import * as A from './analytics.js';
 import {loadSnapshots, SNAP_EVERY} from './snapshots.js';
+import * as G from './gemini.js';
+import * as K from './knowledge.js';
+import * as T from './timing.js';
+import * as CV from './curves.js';
+import * as PK from './packaging.js';
+import {getJson, db} from './store.js';
+import {googleStatus} from './google.js';
 
 const {num, x1, fmtDur, daysAgo, ytIdFrom} = P;
 const plural = (n, [one, few, many]) => { const a = n % 10, b = n % 100; return `${num(n)} ${a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many}`; };
@@ -88,6 +95,57 @@ export async function makeToolContext(env, ctx) {
       if (!data) throw new ToolError('В облачном планере ещё нет данных — автору нужно открыть планер и перенести копию.');
       return data;
     }};
+}
+
+
+/* ----- видео глазами Gemini и превью ----- */
+// Любой ролик: ссылка или id YouTube, либо видео из планера (id или часть названия)
+async function anyVideoId(ctx, ref) {
+  const id = ytIdFrom(ref);
+  if (id) return id;
+  const v = findMyVideo(await ctx.data(), ref), yid = v.yt?.id || ytIdFrom(v.link);
+  if (!yid) throw new ToolError(`«${v.title || 'Без названия'}» ещё не на YouTube — Gemini смотрит только опубликованные публичные ролики.`);
+  return yid;
+}
+// Название, канал и длительность — чтобы подписать ответ и не отдавать Gemini многочасовые стримы целиком
+async function videoInfo(ctx, yid) {
+  if (ctx.env.YT_KEY) try {
+    const it = (await ytVideos(ctx.env, [yid]))[0];
+    if (it) return {title: it.snippet.title, channel: it.snippet.channelTitle, dur: P.isoDur(it.contentDetails?.duration)};
+  } catch (e) {}
+  const data = await ctx.load().then(r => r.data).catch(() => null), v = data?.videos.find(v => v.yt?.id === yid); // запасной вариант — данные планера
+  if (v) return {title: v.title || v.yt.title, channel: 'твоё видео', dur: v.yt.duration || 0};
+  for (const c of data?.competitors || []) { const rv = (c.videos || []).find(x => x.id === yid); if (rv) return {title: rv.title, channel: c.title, dur: rv.duration || 0}; }
+  return null;
+}
+const clipRange = (from, to) => from || to ? ` · кусок ${fmtDur(from)}–${to ? fmtDur(to) : 'конец'}` : '';
+const geminiHead = (yid, info, from, to, r) => `${info ? `«${info.title}» — ${info.channel}, ${fmtDur(info.dur)}` : 'Видео'} youtu.be/${yid}${clipRange(from, to)}` +
+  ` (Gemini${r.model ? ' ' + r.model : ''}${r.cached ? ', сохранённый ответ' : ''})`;
+const PENDING = 'Gemini ещё смотрит видео — ролик длинный. Вызови этот же инструмент с теми же параметрами через 1–2 минуты: результат сохранится в облаке.';
+const MAX_CLIP = 2400; // больше 40 минут за раз не отдаём: долго и съедает дневной лимит Gemini
+
+const b64 = bytes => { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s); };
+const IMG_BASE = env => env.YT_IMG_BASE || 'https://i.ytimg.com/vi/';
+const MIME = {jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif'};
+// Превью ролика с YouTube: в ленте его видят примерно 320×180 (mqdefault), крупно — максимальное доступное
+async function ytThumb(env, yid, size) {
+  for (const name of size === 'feed' ? ['mqdefault'] : ['maxresdefault', 'sddefault', 'hqdefault']) {
+    const r = await fetch(`${IMG_BASE(env)}${yid}/${name}.jpg`).catch(() => null);
+    if (r?.ok) return {bytes: new Uint8Array(await r.arrayBuffer()), mime: 'image/jpeg'};
+  }
+  return null;
+}
+// Превью из планера: картинка в облаке (data/images/…), ссылка или data:-строка
+async function plannerThumb(env, src) {
+  const s = String(src || '');
+  let m = s.match(/^data\/images\/([\w-]+)\.(png|jpe?g|webp|gif)$/);
+  if (m) {
+    const row = await (await db(env)).prepare('SELECT v FROM kv WHERE k = ?').bind(`img:${m[1]}.${m[2]}`).first();
+    return row && {bytes: new Uint8Array(row.v), mime: MIME[m[2]]};
+  }
+  if ((m = s.match(/^data:(image\/[\w+.-]+);base64,(.+)$/))) return {bytes: Uint8Array.from(atob(m[2]), c => c.charCodeAt(0)), mime: m[1]};
+  if (/^https:\/\//.test(s)) { const r = await fetch(s).catch(() => null); if (r?.ok) return {bytes: new Uint8Array(await r.arrayBuffer()), mime: (r.headers.get('content-type') || 'image/jpeg').split(';')[0]}; }
+  return null;
 }
 
 /* ----- поиск объектов по тому, что передал Claude ----- */
@@ -434,6 +492,357 @@ export const TOOLS = [
           'Приёмы в нём: ' + (st.patterns.filter(p => p.x != null && p.fn(title)).map(p => `${p.t} ${x1(p.x)}`).join(', ') || 'нет'));
       }
       return L.join('\n');
+    }
+  },
+  /* ================= база знаний автора (папка knowledge/) ================= */
+  {
+    name: 'knowledge', title: 'База знаний автора',
+    description: 'База знаний, которую собрал автор: правила YouTube, упаковка (названия и превью), хуки, удержание, алгоритм, стратегия, наблюдения по нише. ' +
+      'Перед советом найди подходящие разделы (query) и опирайся на них, а не на общие знания; без параметров — список тем; topic — тема целиком. Бесплатно.',
+    inputSchema: obj({query: {type: 'string', minLength: 2, maxLength: 300, description: 'Что ищешь, например «хук первые секунды» или «норма CTR»'},
+      topic: {type: 'string', minLength: 1, description: 'Тема из списка — прочитать целиком'}}),
+    annotations: READ,
+    async run({query, topic}) {
+      const list = K.knowledgeTopics(), names = list.map(t => t.slug).join(', ');
+      if (!list.length) return 'База знаний пока пустая — автор её ещё не заполнил. Отвечай по общим знаниям и скажи об этом.';
+      if (topic) {
+        const t = K.findTopic(topic);
+        if (!t) throw new ToolError(`Темы «${topic}» нет. Темы: ${names}.`);
+        return `# ${t.title} [${t.slug}]\n${t.when ? 'Когда применять: ' + t.when + '\n' : ''}\n${t.body.length > 40000 ? t.body.slice(0, 40000) + '\n…(обрезано)' : t.body}`;
+      }
+      if (query) {
+        const hits = K.searchKnowledge(query);
+        if (!hits.length) return `По «${query}» в базе ничего не нашлось. Темы: ${names}.`;
+        let out = '', n = 0;
+        for (const h of hits) {
+          const part = `### ${h.topic.title}${h.section.heading ? ' → ' + h.section.heading : ''} [${h.topic.slug}]\n${h.section.text}\n\n`;
+          if (out && out.length + part.length > 15000) break;
+          out += part; n++;
+        }
+        return out.trim() + (n < hits.length ? `\n\n(ещё ${hits.length - n} разделов — уточни запрос или открой тему целиком)` : '');
+      }
+      return 'Темы базы знаний:\n' + list.map(t => `- [${t.slug}] ${t.title}${t.when ? ' — когда: ' + t.when : ''}` +
+        (t.tags.length ? ` (теги: ${t.tags.join(', ')})` : '') + (t.always ? ' — мастер-инструкция, она уже в твоих инструкциях' : '')).join('\n');
+    }
+  },
+  /* ================= видео глазами Gemini и превью ================= */
+  {
+    name: 'video_transcript', title: 'Транскрипт видео',
+    description: 'Дословная расшифровка речи любого публичного ролика YouTube (своего или чужого) с таймкодами [м:сс]. Делает Gemini: он смотрит видео по ссылке. ' +
+      'Полезно, чтобы разобрать хук и структуру у конкурента или сравнить сказанное со сценарием из планера (get_video) и провалами удержания (video_analytics). ' +
+      'Готовые расшифровки хранятся в облаке, повтор мгновенный. Ролики длиннее 40 минут — кусками через from/to. Возможны ошибки в именах и терминах. 1 единица лимита YouTube.',
+    inputSchema: obj({video: {type: 'string', minLength: 1, description: 'Ссылка, id YouTube или видео из планера (id или часть названия)'},
+      from: {type: 'integer', minimum: 0, description: 'С какой секунды (необязательно)'}, to: {type: 'integer', minimum: 1, description: 'По какую секунду (необязательно)'}}, ['video']),
+    annotations: READ_WEB,
+    async run({video, from = 0, to = 0}, ctx) {
+      if (to && to <= from) throw new ToolError('to должно быть больше from.');
+      const yid = await anyVideoId(ctx, video), info = await videoInfo(ctx, yid);
+      let note = '';
+      if (info?.dur > MAX_CLIP && (to || info.dur) - from > MAX_CLIP) {
+        to = from + MAX_CLIP;
+        note = `Видео длинное — здесь ${fmtDur(from)}–${fmtDur(to)}; продолжение: from ${to}.`;
+      }
+      const r = await G.transcript(ctx.env, ctx.ctx, yid, {from, to});
+      if (r.pending) return PENDING;
+      return [geminiHead(yid, info, from, to, r), note, r.truncated ? `Расшифровка оборвалась по длине — продолжение возьми через from, начиная с последнего таймкода.` : '', '', r.text]
+        .filter((x, i) => x || i === 3).join('\n');
+    }
+  },
+  {
+    name: 'watch_video', title: 'Посмотреть видео',
+    description: 'Вопрос о самом видео: Gemini смотрит картинку и слушает звук любого публичного ролика YouTube и отвечает с таймкодами. ' +
+      'Например: что на экране в первые 10 секунд и как сделан хук; где темп проседает; какой текст и графика в кадре; чем подача конкурента отличается от моей; ' +
+      'совпадает ли превью с началом ролика. Для точечного разбора задай from/to — кусок до 5 минут смотрится подробнее. Ответы хранятся неделю. 1 единица лимита YouTube.',
+    inputSchema: obj({video: {type: 'string', minLength: 1, description: 'Ссылка, id YouTube или видео из планера'},
+      question: {type: 'string', minLength: 3, maxLength: 2000, description: 'Что посмотреть в видео'},
+      from: {type: 'integer', minimum: 0, description: 'С какой секунды'}, to: {type: 'integer', minimum: 1, description: 'По какую секунду'}}, ['video', 'question']),
+    annotations: READ_WEB,
+    async run({video, question, from = 0, to = 0}, ctx) {
+      if (to && to <= from) throw new ToolError('to должно быть больше from.');
+      const yid = await anyVideoId(ctx, video), info = await videoInfo(ctx, yid);
+      let note = '';
+      if (info?.dur > MAX_CLIP && (to || info.dur) - from > MAX_CLIP) { to = from + MAX_CLIP; note = `Видео длинное — Gemini смотрел ${fmtDur(from)}–${fmtDur(to)}.`; }
+      const r = await G.askVideo(ctx.env, ctx.ctx, yid, question.trim(), {from, to});
+      if (r.pending) return PENDING;
+      return [geminiHead(yid, info, from, to, r), note, '', r.text].filter((x, i) => x || i === 2).join('\n');
+    }
+  },
+  {
+    name: 'thumbnails', title: 'Превью видео',
+    description: 'Показывает сами картинки превью — их можно разглядеть и разобрать: свои ролики, черновики превью из планера (ещё не опубликованные видео), ' +
+      'ролики конкурентов и любые по ссылкам. Чтобы сравнить с тем, что выстрелило в нише, сначала возьми id из outliers или competitor_videos. ' +
+      'size: feed — 320×180, как превью видят в ленте (по умолчанию, когда картинок больше двух); full — крупно. До 10 штук. Лимит YouTube: до 1 единицы.',
+    inputSchema: obj({videos: {type: 'array', minItems: 1, maxItems: 10, items: {type: 'string'}, description: 'Ссылки, id YouTube или видео из планера (id или часть названия)'},
+      size: {type: 'string', enum: ['feed', 'full']}}, ['videos']),
+    annotations: READ_WEB,
+    async run({videos, size}, ctx) {
+      size ||= videos.length <= 2 ? 'full' : 'feed';
+      const data = await ctx.load().then(r => r.data).catch(() => null), items = [];
+      for (const ref of videos) {
+        const q = String(ref).trim(), yid = ytIdFrom(q);
+        let mine = data?.videos.find(v => v.id === q || (yid && (v.yt?.id === yid || ytIdFrom(v.link) === yid)));
+        if (!mine && !yid) {
+          if (!data) { items.push({ref: q, error: 'не похоже на ссылку или id ролика'}); continue; }
+          try { mine = findMyVideo(data, q); } catch (e) { items.push({ref: q, error: e.message}); continue; }
+        }
+        items.push({ref: q, mine, yid: yid || mine?.yt?.id || ytIdFrom(mine?.link)});
+      }
+      const known = new Map();
+      for (const c of data?.competitors || []) for (const v of c.videos || []) known.set(v.id, {title: v.title, channel: c.title, views: v.views});
+      for (const v of data?.videos || []) if (v.yt?.id) known.set(v.yt.id, {title: v.title || v.yt.title, channel: 'твоё видео', views: v.yt.views});
+      const unknown = [...new Set(items.filter(i => i.yid && !known.has(i.yid)).map(i => i.yid))];
+      if (unknown.length && ctx.env.YT_KEY) try {
+        for (const it of await ytVideos(ctx.env, unknown, 'snippet,statistics')) known.set(it.id, {title: it.snippet.title, channel: it.snippet.channelTitle, views: +it.statistics?.viewCount || 0});
+      } catch (e) {}
+      const pics = await Promise.all(items.map(async i => {
+        if (i.error) return null;
+        // у вышедшего видео — то превью, что сейчас на YouTube; у невышедшего — черновик из планера
+        if (i.yid) { const p = await ytThumb(ctx.env, i.yid, size); if (p) return {...p, from: 'youtube'}; }
+        if (i.mine?.thumb) { const p = await plannerThumb(ctx.env, i.mine.thumb); if (p) return {...p, from: 'planner'}; }
+        return null;
+      }));
+      const content = [{type: 'text', text: `Превью: ${size === 'feed' ? '320×180 — так их видят в ленте' : 'крупно'}.`}];
+      items.forEach((i, n) => {
+        const k = i.yid && known.get(i.yid), p = pics[n];
+        const label = `${n + 1}. ` + (k ? `«${k.title}» — ${k.channel}, ${num(k.views)} просм.` : i.mine ? `«${i.mine.title || 'Без названия'}» — твоё видео, ещё не вышло` : i.ref) +
+          (i.yid ? ` youtu.be/${i.yid}` : '') + (p?.from === 'planner' ? ' (черновик превью из планера)' : '');
+        if (i.error) content.push({type: 'text', text: `${label}: ${i.error}`});
+        else if (!p) content.push({type: 'text', text: `${label}: превью нет${i.mine && !i.yid ? ' — загрузи его в видео в планере' : ''}.`});
+        else if (p.bytes.length > 4.5e6) content.push({type: 'text', text: `${label}: картинка слишком большая (${(p.bytes.length / 1e6).toFixed(1)} МБ) — сожми её в планере.`});
+        else content.push({type: 'text', text: label}, {type: 'image', data: b64(p.bytes), mimeType: p.mime});
+      });
+      return {content};
+    }
+  },
+  /* ================= время публикации, набор просмотров, упаковка, новые конкуренты ================= */
+  {
+    name: 'best_time', title: 'Лучшее время публикации',
+    description: 'Когда публиковать: в какие часы и дни недели смотрят зрители автора (облако раз в час записывает просмотры всех его видео; ' +
+      'нужна хотя бы неделя данных), оценка по странам аудитории (если Google подключён), когда выпускают конкуренты и какие часы чаще дают «иксы», ' +
+      'во сколько выходили свои видео и как сыграли. Время — в часовом поясе автора. Бесплатно.',
+    inputSchema: obj({tz: {type: 'string', description: 'Часовой пояс IANA, например Europe/Kyiv; по умолчанию — пояс автора из планера'},
+      days: {type: 'integer', minimum: 7, maximum: 70, description: 'За сколько дней брать наблюдения, по умолчанию 28'}}),
+    annotations: READ_WEB,
+    async run({tz, days = 28}, ctx) {
+      tz = await T.authorTz(ctx.env, tz);
+      try { T.localParts(0, tz); } catch (e) { throw new ToolError(`Не знаю часовой пояс «${tz}» — нужен вид Europe/Kyiv.`); }
+      const data = await ctx.data(), published = new Map(data.videos.filter(v => v.yt?.id && v.yt.publishedAt).map(v => [v.yt.id, Date.parse(v.yt.publishedAt)]));
+      const [snaps, countries] = await Promise.all([T.loadHourly(ctx.env, days), T.audienceCountries(ctx.env)]);
+      const obs = T.activityFromHourly(snaps, published, tz), est = countries?.length ? T.activityFromCountries(countries, tz) : null;
+      const share = arr => { const t = arr.reduce((a, x) => a + (x || 0), 0); return arr.map(x => t ? (x || 0) / t : 0); };
+      const enough = obs.days >= 5, oh = share(obs.hours), eh = est ? share(est.hours) : null;
+      const L = [`Лучшее время публикации — время в поясе ${tz}.`];
+      if (!snaps.length) L.push('', 'Почасовых наблюдений ещё нет: облако начнёт записывать просмотры твоих видео раз в час — через неделю здесь будет твоя реальная картина.');
+      else if (!enough) L.push('', `Почасовых наблюдений пока ${plural(obs.days, ['день', 'дня', 'дней'])} — для выводов нужна хотя бы неделя; пока больше доверяй оценке по странам.`);
+      if (obs.observed || eh) {
+        const bar = x => '█'.repeat(Math.round(x * 120)) || '·';
+        L.push('', 'Доля просмотров по часам суток' + (obs.observed ? ` | наблюдения за ${plural(obs.days, ['день', 'дня', 'дней'])} (все видео, кроме первых трёх суток после выхода)` : '') +
+          (eh ? ` | оценка по странам (покрыто ${Math.round(est.coverage * 100)}% просмотров)` : '') + ':');
+        const pc = x => (x * 100).toFixed(1).replace('.', ',') + '%';
+        for (let h = 0; h < 24; h++) L.push(`${String(h).padStart(2, '0')}:00 ` + [obs.observed ? `${pc(oh[h])} ${bar(oh[h])}` : '', eh ? `оценка ${pc(eh[h])}` : ''].filter(Boolean).join(' | '));
+      }
+      if (obs.weekdays.some(x => x != null)) {
+        const w = share(obs.weekdays);
+        L.push('', 'По дням недели (средние просмотры в час, доля): ' + T.WD_RU.map((d, i) => obs.weekdays[i] == null ? `${d} —` : `${d} ${Math.round(w[i] * 100)}%`).join(', ') +
+          (obs.days < 14 ? ' — меньше двух недель данных, дни недели пока шумные.' : ''));
+      }
+      if (countries?.length) L.push('', 'Страны аудитории за 28 дн.: ' + countries.slice(0, 8).map(([c, n]) => `${c} ${num(n)}`).join(', '));
+      const rv = T.rivalTiming(data, tz);
+      if (rv.bins.some(b => b.n)) {
+        const fx = x => x == null ? '—' : x1(x);
+        L.push('', 'Конкуренты, длинные видео за полгода — когда выходят (окна по 4 часа): ' +
+          rv.bins.filter(b => b.n).map(b => `${String(b.from).padStart(2, '0')}–${String(b.from + 4).padStart(2, '0')}: ${b.n} шт., медиана ${fx(b.x)}, ×2+ — ${b.hits}`).join('; '),
+          'По дням: ' + rv.weekdays.filter(b => b.n).map(b => `${T.WD_RU[b.wd]} ${b.n} шт. (медиана ${fx(b.x)}, ×2+ — ${b.hits})`).join(', '));
+      }
+      const mine = data.videos.filter(v => v.yt?.publishedAt).sort((a, b) => Date.parse(b.yt.publishedAt) - Date.parse(a.yt.publishedAt)).slice(0, 10);
+      if (mine.length) L.push('', 'Когда выходили твои видео: ' + mine.map(v => { const p = T.localParts(Date.parse(v.yt.publishedAt), tz), x = P.myX(data, v);
+        return `«${clip(v.title || v.yt.title, 40)}» — ${T.WD_RU[p.wd]} ${String(p.hour).padStart(2, '0')}:xx${x != null ? ', ' + x1(x) : ''}`; }).join('; '));
+      const base = enough ? obs.hours.map(x => x || 0) : est?.hours;
+      if (base) {
+        const peak = T.peakWindow(base), at = (peak + 22) % 24;
+        L.push('', `Вывод (${enough ? 'по наблюдениям' : 'по оценке по странам'}): пик просмотров ${String(peak).padStart(2, '0')}:00–${String((peak + 3) % 24).padStart(2, '0')}:00. ` +
+          `Публиковать стоит примерно в ${String(at).padStart(2, '0')}:00 — за 2 часа до пика: первые часы YouTube показывает ролик подписчикам и проверяет в рекомендациях.`);
+      }
+      return L.join('\n');
+    }
+  },
+  {
+    name: 'view_curve', title: 'Как набирают просмотры',
+    description: 'Как обычно набирают просмотры видео канала: медиана и разброс через 6 ч, сутки, 2 дня, неделю, 2 недели и месяц после выхода — ' +
+      'и как свежие ролики идут против этой нормы («через сутки 1 200, обычно 800 → ×1,5»). channel — mine (по умолчанию) или конкурент; ' +
+      'video — один ролик для сравнения. Данные копятся снимками облака (раз в 6 ч, свои — раз в час), поэтому нормы точнее с каждой неделей. Бесплатно.',
+    inputSchema: obj({channel: {type: 'string', description: 'mine — свой канал (по умолчанию) или конкурент: название, @ник или id'},
+      video: {type: 'string', description: 'Ролик для сравнения: ссылка, id YouTube или видео из планера'}, kind: {...KIND, enum: ['video', 'short'], description: 'video — длинные (по умолчанию), short — Shorts'}}),
+    annotations: READ,
+    async run({channel = 'mine', video, kind = 'video'}, ctx) {
+      const data = await ctx.data(), curves = await getJson(ctx.env, 'curves') || {}, short = kind === 'short';
+      let chId, chName, vid = video ? ytIdFrom(video) : '';
+      if (video && !vid) { const v = findMyVideo(data, video); vid = v.yt?.id; if (!vid) throw new ToolError(`«${v.title}» ещё не вышло.`); }
+      if (vid && curves[vid] && channel === 'mine' && curves[vid].c !== data.channel?.yt?.id) channel = curves[vid].c; // чужой ролик — норма его канала
+      if (channel === 'mine') { chId = data.channel?.yt?.id; chName = data.channel?.name || 'твой канал'; }
+      else { const c = (data.competitors || []).find(c => c.id === channel) || findCompetitor(data, channel); chId = c.id; chName = c.title; }
+      if (!chId) throw new ToolError('У канала в планере нет id YouTube — синхронизируй статистику в планере.');
+      let list = CV.channelCurves(curves, chId, short);
+      if (chId === data.channel?.yt?.id) { // свои — добавляем замеры, которые планер копил в браузере
+        const extra = {};
+        for (const r of list) extra[r.id] = {...r, pts: r.pts.slice()};
+        for (const v of data.videos) if (v.yt?.id && v.yt.publishedAt && (v.type === 'short') === short)
+          CV.addPoints(extra, (v.ytHistory || []).map(h => ({id: v.yt.id, c: chId, p: Date.parse(v.yt.publishedAt), t: h.t, views: h.views})));
+        list = Object.entries(extra).map(([id, r]) => ({...r, id}));
+      }
+      const titles = new Map([...data.videos.filter(v => v.yt?.id).map(v => [v.yt.id, v.title || v.yt.title]),
+        ...(data.competitors || []).flatMap(c => (c.videos || []).map(v => [v.id, v.title]))]);
+      const L = [`Набор просмотров — ${chName}, ${short ? 'Shorts' : 'длинные видео'}. Роликов с замерами: ${list.length}.`, '',
+        'Обычно (медиана; в скобках — половина роликов между этими значениями; сколько роликов в выборке):'];
+      let any = false;
+      for (const age of CV.AGES) {
+        const n = CV.normAt(list, age);
+        if (n.median != null) { any = true; L.push(`- через ${CV.AGE_RU[age]}: ${num(n.median)} (${num(n.p25)}–${num(n.p75)}; ${n.n})`); }
+        else L.push(`- через ${CV.AGE_RU[age]}: мало данных (${n.n} из 3 нужных)`);
+      }
+      if (!any) L.push('', 'Норм пока нет: облако снимает цифры с недавних пор, и для каждого возраста нужно хотя бы 3 ролика, которые облако застало до и после него. ' +
+        'Для суток и 2 дней — ролики, вышедшие уже после начала замеров; для недели и месяца данные появятся быстрее.');
+      // сравнение: один ролик или свежие ролики канала (до 30 дней)
+      const now = Date.now(), cmp = vid ? list.filter(r => r.id === vid) : list.filter(r => now - r.p < 30 * 864e5).sort((a, b) => b.p - a.p).slice(0, 8);
+      if (vid && !cmp.length) L.push('', 'Этого ролика нет в замерах облака: облако следит за роликами своего канала и конкурентов не старше 60 дней.');
+      if (cmp.length) {
+        L.push('', vid ? 'Ролик против нормы:' : 'Свежие ролики против нормы:');
+        for (const r of cmp) {
+          const last = r.pts[r.pts.length - 1], age = last[0], norm = CV.normAt(list, age, r.id);
+          const marks = CV.AGES.filter(a => a <= age).map(a => { const v = CV.viewsAt(r.pts, a), m = CV.normAt(list, a, r.id).median; return v != null && m ? `${CV.AGE_SHORT[a]} ${x1(v / m)}` : null; }).filter(Boolean);
+          L.push(`- «${clip(titles.get(r.id) || r.id, 60)}» youtu.be/${r.id}: ${age < 48 ? Math.round(age) + ' ч' : Math.round(age / 24) + ' дн.'} от выхода, ${num(last[1])} просм.` +
+            (norm.median ? `; обычно к этому возрасту ${num(norm.median)} → ${x1(last[1] / norm.median)}` : '; нормы для такого возраста пока нет') +
+            (marks.length ? ` (по вехам: ${marks.join(', ')})` : ''));
+        }
+      }
+      return L.join('\n');
+    }
+  },
+  {
+    name: 'packaging_changes', title: 'Смены названий и превью',
+    description: 'Какие ролики (свои и конкурентов) сменили название или превью и что стало с просмотрами: темп за 48 ч до смены против 48 ч после ' +
+      'и с поправкой на обычное затухание ролика в этом возрасте (эффект ×2 — смена удвоила темп сверх ожидаемого); для своих видео — CTR и показы до и после. ' +
+      'Облако следит за всеми своими видео и роликами конкурентов до 60 дней: названия — раз в 6 ч, превью — по картинке. ' +
+      'images: true вместе с video — показать превью до и после. Бесплатно.',
+    inputSchema: obj({scope: {type: 'string', enum: ['all', 'mine', 'competitors'], description: 'По умолчанию all'},
+      days: {type: 'integer', minimum: 1, maximum: 120, description: 'За сколько дней, по умолчанию 60'},
+      video: {type: 'string', description: 'Только этот ролик: ссылка, id YouTube или видео из планера'}, images: {type: 'boolean', description: 'Показать превью до и после (нужен video)'}}),
+    annotations: READ,
+    async run({scope = 'all', days = 60, video, images = false}, ctx) {
+      const env = ctx.env, data = await ctx.data(), own = data.channel?.yt?.id;
+      const [events, pkg, curves, tz] = await Promise.all([getJson(env, 'pkg:events'), getJson(env, 'pkg'), getJson(env, 'curves'), T.authorTz(env)]);
+      if (!pkg) return 'Облако ещё не начало следить за упаковкой — первый снимок с отслеживанием будет в течение 6 часов.';
+      let vid = '';
+      if (video) { vid = ytIdFrom(video) || findMyVideo(data, video).yt?.id || ''; if (!vid) throw new ToolError('Это видео ещё не вышло.'); }
+      const from = Date.now() - days * 864e5;
+      const list = (events || []).filter(e => e.t >= from && (!vid || e.id === vid) && (scope === 'all' || (scope === 'mine') === (e.c === own))).sort((a, b) => b.t - a.t);
+      const tracked = Object.keys(pkg).length, thumbsChecked = Object.values(pkg).filter(r => r.th).length;
+      const head = `Слежу за упаковкой ${plural(tracked, VIDEOS)} (превью сверено у ${thumbsChecked}).`;
+      if (!list.length) return head + `\nЗа ${plural(days, ['день', 'дня', 'дней'])} смен ${vid ? 'у этого ролика ' : ''}не замечено.`;
+      const titles = new Map([...data.videos.filter(v => v.yt?.id).map(v => [v.yt.id, v.title || v.yt.title]), ...(data.competitors || []).flatMap(c => (c.videos || []).map(v => [v.id, v.title]))]);
+      const chName = c => c === own ? 'твоё' : (data.competitors || []).find(x => x.id === c)?.title || 'канал ' + c;
+      const when = t => new Date(t).toLocaleString('ru-RU', {timeZone: tz, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
+      const vph = (a, b) => a && b ? (b[1] - a[1]) / Math.max(1, (b[0] - a[0]) / 3600e3) : null;
+      const reachSum = (yid, d0, d1) => { let impr = 0, clicks = 0;
+        for (const [d, vids] of Object.entries(data.reach?.days || {})) if (d >= d0 && d <= d1 && vids[yid]) { impr += vids[yid][0]; clicks += vids[yid][0] * vids[yid][1]; }
+        return impr ? {impr, ctr: clicks / impr} : null; };
+      const pct = x => (x * 100).toFixed(1).replace('.', ',') + '%';
+      const L = [head, ''];
+      for (const e of list.slice(0, 40)) {
+        const what = e.type === 'title' ? `название «${clip(e.from, 70)}» → «${clip(e.to, 70)}»` : `превью${e.back ? ' (вернули одно из прежних — похоже на A/B-тест превью)' : ''}`;
+        let line = `- ${when(e.t)} · ${chName(e.c)} · ${e.type === 'title' ? '' : `«${clip(titles.get(e.id) || e.id, 60)}» `}youtu.be/${e.id} — ${what}`;
+        const before = e.vB ? vph(e.vB, [e.t, e.v0]) : null, after = e.vA ? vph([e.t, e.v0], e.vA) : null;
+        if (after != null && before) {
+          line += `; темп до ${num(before)}/ч, после ${num(after)}/ч: ${x1(after / before)}`;
+          const r = curves?.[e.id], list2 = r && CV.channelCurves(curves, r.c, !!r.s);
+          if (r && list2) {
+            const a = (e.t - r.p) / 3600e3, n = age => CV.normAt(list2, age, e.id).median;
+            const [m0, m1, m2] = [n(Math.max(0, a - 48)), n(a), n(a + 48)];
+            if (m0 != null && m1 != null && m2 != null && m1 > m0 && m2 > m1) { const exp = (m2 - m1) / (m1 - m0); line += `; обычно в этом возрасте ${x1(exp)} → эффект ≈${x1(after / before / exp)}`; }
+          }
+        } else if (e.vA === undefined && Date.now() - e.t < 48 * 3600e3) line += `; темп «после» будет через ${Math.ceil((e.t + 48 * 3600e3 - Date.now()) / 3600e3)} ч`;
+        else if (!e.vB) line += '; темп «до» неизвестен — облако не застало ролик за 48 ч до смены';
+        if (e.c === own) {
+          const day = new Date(e.t).toISOString().slice(0, 10), b = reachSum(e.id, P.isoPlus(day, -7), P.isoPlus(day, -1)), a = reachSum(e.id, P.isoPlus(day, 1), P.isoPlus(day, 7));
+          if (b && a) line += `; CTR ${pct(b.ctr)} → ${pct(a.ctr)} (показы за 7 дн. ${num(b.impr)} → ${num(a.impr)})`;
+        }
+        L.push(line);
+      }
+      if (list.length > 40) L.push(`…и ещё ${list.length - 40}. Сузь days или scope.`);
+      L.push('', 'Точное время смены — между прошлой проверкой и отмеченным моментом (до 6–7 ч). Темп сравнивается по снимкам облака.');
+      if (!(images && vid)) return L.join('\n');
+      const content = [{type: 'text', text: L.join('\n')}];
+      for (const e of list.filter(e => e.type === 'thumb').slice(0, 4)) {
+        const [b, a] = await Promise.all([PK.loadImage(env, e.from), PK.loadImage(env, e.to)]);
+        content.push({type: 'text', text: `${when(e.t)} — превью до:`}, ...(b ? [{type: 'image', data: b64(b), mimeType: 'image/jpeg'}] : [{type: 'text', text: '(картинка «до» не сохранилась)'}]),
+          {type: 'text', text: 'после:'}, ...(a ? [{type: 'image', data: b64(a), mimeType: 'image/jpeg'}] : [{type: 'text', text: '(картинка «после» не сохранилась)'}]));
+      }
+      if (content.length === 1) content.push({type: 'text', text: 'Смен превью у этого ролика нет — только названия.'});
+      return {content};
+    }
+  },
+  {
+    name: 'discover_channels', title: 'Найти новых конкурентов',
+    description: 'Ищет каналы, которых ещё нет среди конкурентов: (1) рядом с чьими роликами YouTube рекомендует видео автора — из закрытой аналитики, ' +
+      'это самый точный сигнал общей аудитории (нужен Google в облаке); (2) какие каналы рекомендуют у себя на странице текущие конкуренты; ' +
+      '(3) по желанию — кто в топе поиска по реальным запросам, которыми находят автора (search: true, дорого — 100 единиц лимита за запрос). ' +
+      'Для каждого — подписчики, средние просмотры на видео и откуда сигнал. Добавить понравившиеся — add_competitor. Без search — ≈15 единиц лимита.',
+    inputSchema: obj({days: {type: 'integer', enum: [28, 90, 365], description: 'За какой период брать рекомендации, по умолчанию 90'},
+      search: {type: 'boolean', description: 'Ещё и поиск по 2 главным поисковым запросам (200 единиц лимита)'},
+      limit: {type: 'integer', minimum: 1, maximum: 40, description: 'По умолчанию 20'}}),
+    annotations: READ_WEB,
+    async run({days = 90, search = false, limit = 20}, ctx) {
+      const env = ctx.env, data = await ctx.data(), own = data.channel?.yt?.id;
+      const known = new Set([own, ...(data.competitors || []).map(c => c.id)].filter(Boolean));
+      const cand = new Map(), add = (id, f) => { if (!id || known.has(id)) return; const c = cand.get(id) || {id, rel: 0, relVideos: new Set(), featuredBy: new Set(), searchHits: 0}; f(c); cand.set(id, c); };
+      const notes = [];
+      // 1. рекомендуемые: по каналу целиком и по пяти последним своим длинным видео (у каждого запроса YouTube отдаёт до 25 строк)
+      const google = (await googleStatus(env)).connected;
+      if (google) {
+        const relQ = extra => A.report(env, days, {metrics: 'views', dimensions: 'insightTrafficSourceDetail', sort: '-views', maxResults: '25',
+          filters: ['insightTrafficSourceType==RELATED_VIDEO', extra].filter(Boolean).join(';')}).catch(() => []);
+        const recent = data.videos.filter(v => v.yt?.id && v.type !== 'short').sort((a, b) => Date.parse(b.yt.publishedAt) - Date.parse(a.yt.publishedAt)).slice(0, 5);
+        const rows = (await Promise.all([relQ(''), ...recent.map(v => relQ('video==' + v.yt.id))])).flat();
+        const byVideo = new Map();
+        for (const r of rows) byVideo.set(r.insightTrafficSourceDetail, Math.max(byVideo.get(r.insightTrafficSourceDetail) || 0, r.views));
+        const ids = [...byVideo.keys()].filter(id => /^[\w-]{11}$/.test(id));
+        for (const it of ids.length ? await ytVideos(env, ids, 'snippet') : [])
+          add(it.snippet.channelId, c => { c.rel += byVideo.get(it.id) || 0; c.relVideos.add(it.snippet.title); });
+      } else notes.push('Google не подключён к облаку — без самого точного сигнала (рекомендации рядом с чужими роликами).');
+      // 2. каналы, которые конкуренты рекомендуют у себя на странице
+      await Promise.all((data.competitors || []).slice(0, 20).map(async comp => {
+        try {
+          const d = await P.yt(env, 'channelSections', {part: 'contentDetails', channelId: comp.id});
+          for (const sec of d.items || []) for (const id of sec.contentDetails?.channels || []) add(id, c => c.featuredBy.add(comp.title));
+        } catch (e) {}
+      }));
+      // 3. поиск по главным запросам, которыми находят автора (дорого — только по просьбе)
+      if (search) {
+        let terms = [];
+        if (google) terms = (await A.report(env, days, {metrics: 'views', dimensions: 'insightTrafficSourceDetail', filters: 'insightTrafficSourceType==YT_SEARCH', sort: '-views', maxResults: '10'}).catch(() => []))
+          .map(r => r.insightTrafficSourceDetail).filter(Boolean).slice(0, 2);
+        if (!terms.length) notes.push('Поиск пропущен: нет поисковых запросов из аналитики.');
+        for (const q of terms) {
+          const d = await P.yt(env, 'search', {part: 'snippet', type: 'video', q, maxResults: 25, order: 'relevance'});
+          for (const it of d.items || []) add(it.snippet?.channelId, c => { c.searchHits++; (c.terms ||= new Set()).add(q); });
+        }
+      }
+      if (!cand.size) return ['Новых каналов не нашлось.', ...notes].join('\n');
+      const stats = new Map();
+      const ids = [...cand.keys()];
+      for (let i = 0; i < ids.length; i += 50)
+        for (const ch of (await P.yt(env, 'channels', {part: 'snippet,statistics', id: ids.slice(i, i + 50).join(',')})).items || []) stats.set(ch.id, ch);
+      const score = c => c.rel * 3 + c.featuredBy.size * 40 + c.searchHits * 15;
+      const list = [...cand.values()].filter(c => stats.has(c.id)).sort((a, b) => score(b) - score(a)).slice(0, limit);
+      const L = [`Кандидаты в конкуренты (${list.length} из ${cand.size}; самые сильные сигналы — сверху):`];
+      for (const c of list) {
+        const ch = stats.get(c.id), st = ch.statistics || {}, vids = +st.videoCount || 0, avg = vids ? +st.viewCount / vids : 0;
+        const why = [c.rel ? `YouTube показывал тебя рядом с ${plural(c.relVideos.size, ['его роликом', 'его роликами', 'его роликами'])} (${num(c.rel)} просм. к тебе): ${[...c.relVideos].slice(0, 2).map(t => '«' + clip(t, 50) + '»').join(', ')}` : '',
+          c.featuredBy.size ? `его рекомендует на своей странице ${[...c.featuredBy].join(', ')}` : '', c.searchHits ? `в топе поиска по «${[...c.terms].join('», «')}» (${c.searchHits} шт.)` : ''].filter(Boolean);
+        L.push(`- ${ch.snippet.title}${ch.snippet.customUrl ? ' (' + ch.snippet.customUrl + ')' : ''} [${c.id}] — ${st.hiddenSubscriberCount ? 'подписчики скрыты' : num(+st.subscriberCount) + ' подп.'}, ` +
+          `${plural(vids, VIDEOS)}, ≈${num(avg)} просм. на ролик. ${why.join('; ')}.`);
+      }
+      return [...L, ...(notes.length ? ['', ...notes] : []), '', 'Добавить в конкуренты — add_competitor с @ником или id.'].join('\n');
     }
   },
   /* ================= YouTube Analytics (нужен Google, подключённый к облаку) ================= */
